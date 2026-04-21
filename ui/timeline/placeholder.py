@@ -1,5 +1,5 @@
 # mypy: ignore-errors
-"""Read-only timeline dock for the redesign rollout."""
+"""Timeline dock for the redesign rollout."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import math
 import re
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import QEvent, QRectF, QSize
-from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
+from PySide6.QtCore import QEvent, QRectF, QSize, Signal
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -52,6 +52,8 @@ class TimelineMarker:
     label: str
     kind: str
     color: str
+    source_x_m: float | None = None
+    source_y_m: float | None = None
 
 
 @dataclass
@@ -70,6 +72,7 @@ class TimelineRow:
     markers: list[TimelineMarker] = field(default_factory=list)
     spans: list[TimelineSpan] = field(default_factory=list)
     lane_count: int = 1
+    constraint_key: str | None = None
 
 
 @dataclass
@@ -80,6 +83,14 @@ class TimelineProjection:
     rows: list[TimelineRow]
     axis_label: str = "Path Progress"
     axis_unit: str = "m"
+
+
+@dataclass
+class _SimTimeIndex:
+    sample_s: list[float]
+    sample_t: list[float]
+    sample_x: list[float]
+    sample_y: list[float]
 
 
 def _row_height_for(row: TimelineRow) -> int:
@@ -172,14 +183,29 @@ class _TimelineRailCanvas(_TimelineCanvasBase):
 
 
 class _TimelineTrackCanvas(_TimelineCanvasBase):
+    scrubRequested = Signal(float)
+    playPauseToggleRequested = Signal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._zoom_px_per_m = DEFAULT_ZOOM_PX_PER_M
+        self._playhead_s_m = 0.0
+        self._is_playing = False
+        self._scrub_active = False
+        self._scrub_moved = False
+        self._pressed_on_playhead = False
         self.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
+        self.setMouseTracking(True)
 
     def set_zoom_px_per_m(self, zoom_px_per_m: int) -> None:
         self._zoom_px_per_m = max(MIN_ZOOM_PX_PER_M, min(MAX_ZOOM_PX_PER_M, int(zoom_px_per_m)))
         self.updateGeometry()
+        self.update()
+
+    def set_playhead(self, s_m: float, playing: bool) -> None:
+        max_s = max(0.0, float(self._projection.display_s_m))
+        self._playhead_s_m = max(0.0, min(float(s_m), max_s))
+        self._is_playing = bool(playing)
         self.update()
 
     def sizeHint(self) -> QSize:
@@ -253,6 +279,16 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             int(track_rect.center().y() + 5),
             row.empty_text,
         )
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        super().paintEvent(event)
+        if not self._projection.rows:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        self._draw_playhead(painter)
+        painter.end()
 
     def _draw_markers(self, painter: QPainter, row: TimelineRow, track_rect: QRectF) -> None:
         center_y = track_rect.center().y()
@@ -337,10 +373,12 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             x1 = self._x_for_s(span.end_s_m)
             if x1 < x0:
                 x0, x1 = x1, x0
+            center_x = (x0 + x1) / 2.0
             width = max(8.0, x1 - x0)
+            left_x = center_x - (width / 2.0)
             lane_index = max(0, int(getattr(span, "lane", 0)))
             bar_y = lanes_top + lane_index * (lane_h + lane_gap)
-            rect = QRectF(x0, bar_y, width, lane_h)
+            rect = QRectF(left_x, bar_y, width, lane_h)
             color = QColor(span.color)
             fill = QColor(color)
             fill.setAlpha(220)
@@ -358,15 +396,96 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                     text,
                 )
 
+    def _draw_playhead(self, painter: QPainter) -> None:
+        x = self._x_for_s(self._playhead_s_m)
+        line_color = QColor("#55d38a") if self._is_playing else QColor("#e6edf5")
+        line_pen = QPen(line_color, 2)
+        painter.setPen(line_pen)
+        painter.drawLine(
+            int(round(x)),
+            TOP_PADDING,
+            int(round(x)),
+            self.height() - BOTTOM_PADDING,
+        )
+
+        head_y = TOP_PADDING + 3
+        triangle = QPolygonF(
+            [
+                _qpointf(x - 7, head_y),
+                _qpointf(x + 7, head_y),
+                _qpointf(x, head_y + 10),
+            ]
+        )
+        painter.setPen(QPen(line_color, 1.2))
+        painter.setBrush(line_color)
+        painter.drawPolygon(triangle)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() != Qt.LeftButton:
+            return super().mousePressEvent(event)
+        self._scrub_active = True
+        self._scrub_moved = False
+        self._pressed_on_playhead = self._is_playhead_click(event)
+        if not self._pressed_on_playhead:
+            self._emit_scrub_for_event(event)
+        event.accept()
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self._scrub_active:
+            self._scrub_moved = True
+            self._emit_scrub_for_event(event)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if not self._scrub_active or event.button() != Qt.LeftButton:
+            return super().mouseReleaseEvent(event)
+
+        if self._scrub_moved or not self._pressed_on_playhead:
+            self._emit_scrub_for_event(event)
+        should_toggle = self._pressed_on_playhead and self._is_playhead_click(event) and not self._scrub_moved
+        self._scrub_active = False
+        self._scrub_moved = False
+        self._pressed_on_playhead = False
+        if should_toggle:
+            self.playPauseToggleRequested.emit()
+        event.accept()
+
+    def _emit_scrub_for_event(self, event: QMouseEvent) -> None:
+        self.scrubRequested.emit(self._s_for_x(float(event.position().x())))
+
+    def _s_for_x(self, x: float) -> float:
+        return max(
+            0.0,
+            min(
+                (float(x) - self._track_left()) / max(1.0, float(self._zoom_px_per_m)),
+                float(self._projection.display_s_m),
+            ),
+        )
+
+    def _is_playhead_click(self, event: QMouseEvent) -> bool:
+        x = float(event.position().x())
+        y = float(event.position().y())
+        playhead_x = self._x_for_s(self._playhead_s_m)
+        return abs(x - playhead_x) <= 8.0 and y <= (TOP_PADDING + RULER_HEIGHT)
+
 
 class TimelineDock(QFrame):
-    """Simple read-only timeline dock used for Phase 2."""
+    """Timeline dock with editor-style playhead transport."""
+
+    scrubRequested = Signal(float)
+    playPauseToggled = Signal()
 
     def __init__(self, path: Path | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._path: Path | None = None
         self._config: dict[str, object] = {}
         self._projection = TimelineProjection(0.0, 6.0, "", [])
+        self._current_time_s = 0.0
+        self._total_time_s = 0.0
+        self._is_playing = False
+        self._playback_label: QLabel
         self._summary_label: QLabel
         self._zoom_label: QLabel
         self._zoom_slider: QSlider
@@ -423,7 +542,8 @@ class TimelineDock(QFrame):
                 border-radius: 6px;
                 background: #d8dee6;
             }
-            QLabel#timelineZoomLabel {
+            QLabel#timelineZoomLabel,
+            QLabel#timelinePlaybackLabel {
                 color: #bcc4cc;
                 font-size: 11px;
             }
@@ -452,6 +572,10 @@ class TimelineDock(QFrame):
         self._summary_label.setObjectName("timelineToolbarMeta")
         self._summary_label.setWordWrap(False)
         toolbar_layout.addWidget(self._summary_label, 1)
+
+        self._playback_label = QLabel("Paused at 0.00 / 0.00 s")
+        self._playback_label.setObjectName("timelinePlaybackLabel")
+        toolbar_layout.addWidget(self._playback_label)
 
         zoom_out_btn = QPushButton("-")
         zoom_out_btn.setProperty("timelineControl", "true")
@@ -504,6 +628,8 @@ class TimelineDock(QFrame):
         self._track_scroll.viewport().installEventFilter(self)
 
         self._track_canvas = _TimelineTrackCanvas()
+        self._track_canvas.scrubRequested.connect(self._on_scrub_requested)
+        self._track_canvas.playPauseToggleRequested.connect(self._on_play_pause_toggled)
         self._track_scroll.setWidget(self._track_canvas)
         body_layout.addWidget(self._track_scroll, 1)
         outer.addWidget(body, 1)
@@ -532,7 +658,9 @@ class TimelineDock(QFrame):
         self._summary_label.setText(self._projection.summary_text)
         self._rail_canvas.set_projection(self._projection)
         self._track_canvas.set_projection(self._projection)
+        self._track_canvas.set_playhead(self._current_time_s, self._is_playing)
         self._sync_canvas_size()
+        self.fit_to_all()
 
     def fit_to_all(self) -> None:
         display_s_m = max(self._projection.display_s_m, 0.0)
@@ -545,6 +673,25 @@ class TimelineDock(QFrame):
 
     def _adjust_zoom(self, delta: int) -> None:
         self._zoom_slider.setValue(self._zoom_slider.value() + int(delta))
+
+    def set_playback_state(
+        self,
+        current_time_s: float,
+        total_time_s: float,
+        is_playing: bool,
+        enabled: bool,
+    ) -> None:
+        self._current_time_s = max(0.0, float(current_time_s))
+        self._total_time_s = max(0.0, float(total_time_s))
+        self._is_playing = bool(is_playing and enabled)
+        self._track_canvas.set_playhead(self._current_time_s, self._is_playing)
+        state_text = "Playing" if self._is_playing else "Paused"
+        if not enabled or self._total_time_s <= 1e-9:
+            state_text = "No simulation"
+        self._playback_label.setText(
+            f"{state_text} at {self._current_time_s:.2f} / {self._total_time_s:.2f} s"
+        )
+        self._ensure_playhead_visible()
 
     def _on_zoom_changed(self, value: int) -> None:
         old_zoom = getattr(self._track_canvas, "_zoom_px_per_m", DEFAULT_ZOOM_PX_PER_M)
@@ -580,6 +727,25 @@ class TimelineDock(QFrame):
             self._track_scroll.verticalScrollBar().maximum(),
         )
         self._rail_scroll.verticalScrollBar().setValue(self._track_scroll.verticalScrollBar().value())
+
+    def _on_scrub_requested(self, time_s: float) -> None:
+        self.scrubRequested.emit(float(time_s))
+
+    def _on_play_pause_toggled(self) -> None:
+        self.playPauseToggled.emit()
+
+    def _ensure_playhead_visible(self) -> None:
+        hbar = self._track_scroll.horizontalScrollBar()
+        viewport_width = max(1, self._track_scroll.viewport().width())
+        playhead_x = TRACK_PADDING_X + self._current_time_s * float(self._track_canvas._zoom_px_per_m)
+        visible_left = float(hbar.value())
+        visible_right = visible_left + float(viewport_width)
+        margin = min(96.0, viewport_width * 0.25)
+
+        if playhead_x < visible_left + margin:
+            hbar.setValue(int(round(playhead_x - margin)))
+        elif playhead_x > visible_right - margin:
+            hbar.setValue(int(round(playhead_x - viewport_width + margin)))
 
     def _forward_vertical_wheel(self, event) -> None:
         scrollbar = self._track_scroll.verticalScrollBar()
@@ -620,9 +786,29 @@ def _build_projection(
     waypoint_count = 0
 
     if anchor_data["anchor_indices"]:
-        structure_markers.append(TimelineMarker(0.0, "Start", "start", "#5ac878"))
+        first_anchor = path_elements[anchor_data["anchor_indices"][0]]
+        structure_markers.append(
+            TimelineMarker(
+                0.0,
+                "Start",
+                "start",
+                "#5ac878",
+                source_x_m=_element_x(first_anchor),
+                source_y_m=_element_y(first_anchor),
+            )
+        )
         if len(anchor_data["anchor_indices"]) > 1 and total_s_m > 0.0:
-            structure_markers.append(TimelineMarker(total_s_m, "End", "end", "#d96a6a"))
+            last_anchor = path_elements[anchor_data["anchor_indices"][-1]]
+            structure_markers.append(
+                TimelineMarker(
+                    total_s_m,
+                    "End",
+                    "end",
+                    "#d96a6a",
+                    source_x_m=_element_x(last_anchor),
+                    source_y_m=_element_y(last_anchor),
+                )
+            )
 
     for index, element in enumerate(path_elements):
         s_m = _element_global_s(index, element, path_elements, anchor_s_by_path_index)
@@ -630,12 +816,28 @@ def _build_projection(
             translation_count += 1
             structure_count += 1
             structure_markers.append(
-                TimelineMarker(s_m, f"T{translation_count}", "translation", "#60b7ff")
+                TimelineMarker(
+                    s_m,
+                    f"T{translation_count}",
+                    "translation",
+                    "#60b7ff",
+                    source_x_m=_element_x(element),
+                    source_y_m=_element_y(element),
+                )
             )
         elif isinstance(element, Waypoint):
             waypoint_count += 1
             structure_count += 1
-            structure_markers.append(TimelineMarker(s_m, f"W{waypoint_count}", "waypoint", "#9c8cff"))
+            structure_markers.append(
+                TimelineMarker(
+                    s_m,
+                    f"W{waypoint_count}",
+                    "waypoint",
+                    "#9c8cff",
+                    source_x_m=_element_x(element),
+                    source_y_m=_element_y(element),
+                )
+            )
         elif isinstance(element, RotationTarget):
             rotation_count += 1
             structure_markers.append(TimelineMarker(s_m, f"R{rotation_count}", "rotation", "#ff9c5a"))
@@ -668,6 +870,7 @@ def _build_projection(
                 empty_text="No ranges yet.",
                 spans=spans,
                 lane_count=lane_count,
+                constraint_key=key,
             )
         )
 
@@ -825,6 +1028,108 @@ def _build_constraint_spans(
     return spans
 
 
+def _build_constraint_spans_for_axis(
+    path: Path,
+    key: str,
+    path_elements: list[object],
+    *,
+    mapper,
+    sim_index: _SimTimeIndex | None,
+) -> list[TimelineSpan]:
+    domain_positions = _constraint_domain_axis_positions(
+        path,
+        key,
+        path_elements,
+        mapper=mapper,
+        sim_index=sim_index,
+    )
+    return _build_constraint_spans_from_positions(path, key, domain_positions)
+
+
+def _constraint_domain_axis_positions(
+    path: Path,
+    key: str,
+    path_elements: list[object],
+    *,
+    mapper,
+    sim_index: _SimTimeIndex | None,
+) -> list[float]:
+    domain_elements = list(get_constraint_domain_elements(path, key))
+    if not domain_elements:
+        return []
+
+    anchor_data = _build_anchor_distances(path_elements)
+    anchor_s_by_path_index = anchor_data["anchor_s_by_path_index"]
+    element_index_by_identity = {id(element): index for index, element in enumerate(path_elements)}
+    positions: list[float] = []
+
+    for element in domain_elements:
+        element_index = element_index_by_identity.get(id(element))
+        source_s = 0.0
+        if element_index is not None:
+            source_s = _element_global_s(
+                element_index,
+                element,
+                path_elements,
+                anchor_s_by_path_index,
+            )
+
+        mapped = None
+        if sim_index is not None:
+            source_x = _element_x(element)
+            source_y = _element_y(element)
+            if source_x is not None and source_y is not None:
+                mapped = _closest_time_for_point(
+                    sim_index,
+                    float(source_x),
+                    float(source_y),
+                    expected_s=source_s,
+                )
+        positions.append(float(mapped if mapped is not None else mapper(source_s)))
+
+    return positions
+
+
+def _build_constraint_spans_from_positions(
+    path: Path,
+    key: str,
+    domain_positions: list[float],
+) -> list[TimelineSpan]:
+    if not domain_positions:
+        return []
+
+    spans: list[TimelineSpan] = []
+    for rc in getattr(path, "ranged_constraints", []) or []:
+        if getattr(rc, "key", "") != key:
+            continue
+        total = len(domain_positions)
+        if total <= 0:
+            continue
+        start_ord = max(1, min(int(getattr(rc, "start_ordinal", 1)), total))
+        end_ord = max(start_ord, min(int(getattr(rc, "end_ordinal", start_ord)), total))
+        start_index = start_ord - 1
+        end_index = end_ord - 1
+        if start_index > 0:
+            start_s = float(domain_positions[start_index - 1])
+        else:
+            start_s = float(domain_positions[start_index])
+        end_s = float(domain_positions[end_index])
+        unit = str(SPINNER_UNITS.get(key, "") or "")
+        label = f"{float(getattr(rc, 'value', 0.0)):g}{unit}"
+        spans.append(
+            TimelineSpan(
+                start_s_m=float(start_s),
+                end_s_m=float(end_s),
+                label=label,
+                color=_constraint_color(key),
+            )
+        )
+
+    spans.sort(key=lambda span: (span.start_s_m, span.end_s_m))
+    _assign_span_lanes(spans)
+    return spans
+
+
 def _assign_span_lanes(spans: list[TimelineSpan]) -> None:
     lane_end_s: list[float] = []
     eps = 1e-9
@@ -887,6 +1192,22 @@ def _plain_label(label: str) -> str:
     return label
 
 
+def _element_x(element: object) -> float | None:
+    if isinstance(element, TranslationTarget):
+        return float(element.x_meters)
+    if isinstance(element, Waypoint):
+        return float(element.translation_target.x_meters)
+    return None
+
+
+def _element_y(element: object) -> float | None:
+    if isinstance(element, TranslationTarget):
+        return float(element.y_meters)
+    if isinstance(element, Waypoint):
+        return float(element.translation_target.y_meters)
+    return None
+
+
 def _format_axis_label(value: float, step: float, unit: str) -> str:
     suffix = f" {unit}" if unit else ""
     if step < 1.0:
@@ -921,7 +1242,7 @@ def _map_projection_distance_to_time(
         projection.total_s_m = 0.0
         return
 
-    mapper, total_t = _build_time_mapper(
+    mapper, total_t, sim_index = _build_time_mapper(
         path=path,
         projection=projection,
         config=config,
@@ -930,10 +1251,33 @@ def _map_projection_distance_to_time(
 
     for row in projection.rows:
         for marker in row.markers:
-            marker.s_m = mapper(marker.s_m)
-        for span in row.spans:
-            span.start_s_m = mapper(span.start_s_m)
-            span.end_s_m = mapper(span.end_s_m)
+            source_s = marker.s_m
+            mapped = None
+            if (
+                sim_index is not None
+                and marker.source_x_m is not None
+                and marker.source_y_m is not None
+            ):
+                mapped = _closest_time_for_point(
+                    sim_index,
+                    float(marker.source_x_m),
+                    float(marker.source_y_m),
+                    expected_s=source_s,
+                )
+            marker.s_m = float(mapped if mapped is not None else mapper(source_s))
+        if row.constraint_key:
+            row.spans = _build_constraint_spans_for_axis(
+                path,
+                row.constraint_key,
+                list(getattr(path, "path_elements", []) or []),
+                mapper=mapper,
+                sim_index=sim_index,
+            )
+            row.lane_count = _lane_count_for_spans(row.spans)
+        else:
+            for span in row.spans:
+                span.start_s_m = mapper(span.start_s_m)
+                span.end_s_m = mapper(span.end_s_m)
 
     projection.total_s_m = total_t
     projection.display_s_m = max(1.0, total_t)
@@ -954,57 +1298,166 @@ def _build_time_mapper(
 
     if not use_sim_time:
         total_t = total_s / default_v
-        return (lambda s: max(0.0, min(float(s), total_s)) / default_v), total_t
+        return (lambda s: max(0.0, min(float(s), total_s)) / default_v), total_t, None
 
     try:
-        sim = simulate_path(path, config, dt_s=0.02)
-        times = list(getattr(sim, "times_sorted", []) or [])
-        poses = dict(getattr(sim, "poses_by_time", {}) or {})
-        if len(times) < 2 or not poses:
-            raise ValueError("not enough simulation samples")
-
-        sample_s: list[float] = []
-        sample_t: list[float] = []
-        cumulative_d = 0.0
-        prev_xy: tuple[float, float] | None = None
-        for t in times:
-            pose = poses.get(t)
-            if pose is None:
-                continue
-            x, y, _ = pose
-            if prev_xy is not None:
-                cumulative_d += math.hypot(float(x) - prev_xy[0], float(y) - prev_xy[1])
-            prev_xy = (float(x), float(y))
-            sample_s.append(cumulative_d)
-            sample_t.append(float(t))
-
-        if len(sample_s) < 2 or cumulative_d <= 1e-9:
-            raise ValueError("insufficient mapping samples")
-
-        scale = total_s / cumulative_d
-        sample_s = [s_val * scale for s_val in sample_s]
-        total_t = float(sample_t[-1])
+        sim_index, total_t = _build_sim_time_index(path, config, total_s)
 
         def map_s_to_t(s_value: float) -> float:
             s = max(0.0, min(float(s_value), total_s))
-            idx = bisect.bisect_left(sample_s, s)
+            idx = bisect.bisect_left(sim_index.sample_s, s)
             if idx <= 0:
-                return sample_t[0]
-            if idx >= len(sample_s):
-                return sample_t[-1]
-            s0 = sample_s[idx - 1]
-            s1 = sample_s[idx]
-            t0 = sample_t[idx - 1]
-            t1 = sample_t[idx]
+                return sim_index.sample_t[0]
+            if idx >= len(sim_index.sample_s):
+                return sim_index.sample_t[-1]
+            s0 = sim_index.sample_s[idx - 1]
+            s1 = sim_index.sample_s[idx]
+            t0 = sim_index.sample_t[idx - 1]
+            t1 = sim_index.sample_t[idx]
             if s1 <= s0 + 1e-9:
-                return t1
+                return t0
             alpha = (s - s0) / (s1 - s0)
             return t0 + alpha * (t1 - t0)
 
-        return map_s_to_t, max(total_t, 1e-6)
+        return map_s_to_t, max(total_t, 1e-6), sim_index
     except Exception:
         total_t = total_s / default_v
-        return (lambda s: max(0.0, min(float(s), total_s)) / default_v), total_t
+        return (lambda s: max(0.0, min(float(s), total_s)) / default_v), total_t, None
+
+
+def _build_sim_time_index(
+    path: Path,
+    config: dict[str, object],
+    total_s: float,
+) -> tuple[_SimTimeIndex, float]:
+    sim = simulate_path(path, config, dt_s=0.02)
+    times = list(getattr(sim, "times_sorted", []) or [])
+    poses = dict(getattr(sim, "poses_by_time", {}) or {})
+    if len(times) < 2 or not poses:
+        raise ValueError("not enough simulation samples")
+
+    segments, total_len = _build_anchor_progress_geometry(list(getattr(path, "path_elements", []) or []))
+    if not segments or total_len <= 1e-9:
+        raise ValueError("insufficient anchor geometry")
+
+    sample_s: list[float] = []
+    sample_t: list[float] = []
+    sample_x: list[float] = []
+    sample_y: list[float] = []
+    last_s = 0.0
+
+    for t in times:
+        pose = poses.get(t)
+        if pose is None:
+            continue
+        x, y, _ = pose
+        s_val = _project_point_to_global_s(float(x), float(y), segments, fallback_s=last_s)
+        s_val = min(float(total_len), max(last_s, s_val))
+        sample_s.append(s_val)
+        sample_t.append(float(t))
+        sample_x.append(float(x))
+        sample_y.append(float(y))
+        last_s = s_val
+
+    if len(sample_s) < 2:
+        raise ValueError("not enough projected samples")
+
+    return (
+        _SimTimeIndex(
+            sample_s=sample_s,
+            sample_t=sample_t,
+            sample_x=sample_x,
+            sample_y=sample_y,
+        ),
+        float(sample_t[-1]),
+    )
+
+
+def _build_anchor_progress_geometry(
+    path_elements: list[object],
+) -> tuple[list[tuple[float, float, float, float, float, float, float]], float]:
+    anchors: list[tuple[float, float]] = []
+    for element in path_elements:
+        if isinstance(element, TranslationTarget):
+            anchors.append((float(element.x_meters), float(element.y_meters)))
+        elif isinstance(element, Waypoint):
+            anchors.append(
+                (
+                    float(element.translation_target.x_meters),
+                    float(element.translation_target.y_meters),
+                )
+            )
+
+    if len(anchors) < 2:
+        return [], 0.0
+
+    segments: list[tuple[float, float, float, float, float, float, float]] = []
+    cumulative = 0.0
+    for i in range(len(anchors) - 1):
+        ax, ay = anchors[i]
+        bx, by = anchors[i + 1]
+        dx = bx - ax
+        dy = by - ay
+        denom = dx * dx + dy * dy
+        seg_len = math.hypot(dx, dy)
+        start_s = cumulative
+        cumulative += seg_len
+        segments.append((ax, ay, dx, dy, denom, start_s, seg_len))
+
+    return segments, cumulative
+
+
+def _project_point_to_global_s(
+    x_m: float,
+    y_m: float,
+    segments: list[tuple[float, float, float, float, float, float, float]],
+    fallback_s: float,
+) -> float:
+    if not segments:
+        return float(fallback_s)
+
+    best_s = float(fallback_s)
+    best_dist2: float | None = None
+    for ax, ay, dx, dy, denom, start_s, seg_len in segments:
+        t = 0.0
+        if denom > 1e-12:
+            t = ((x_m - ax) * dx + (y_m - ay) * dy) / denom
+            t = max(0.0, min(1.0, t))
+        proj_x = ax + t * dx
+        proj_y = ay + t * dy
+        dist2 = (x_m - proj_x) ** 2 + (y_m - proj_y) ** 2
+        s_val = start_s + (seg_len * t)
+        if best_dist2 is None or dist2 < best_dist2:
+            best_dist2 = dist2
+            best_s = s_val
+    return float(best_s)
+
+
+def _closest_time_for_point(
+    sim_index: _SimTimeIndex,
+    x_m: float,
+    y_m: float,
+    *,
+    expected_s: float,
+) -> float | None:
+    if not sim_index.sample_t:
+        return None
+
+    best_idx: int | None = None
+    best_score: float | None = None
+    for idx, (sx, sy, ss) in enumerate(
+        zip(sim_index.sample_x, sim_index.sample_y, sim_index.sample_s)
+    ):
+        dist2 = (float(sx) - x_m) ** 2 + (float(sy) - y_m) ** 2
+        s_bias = 0.25 * abs(float(ss) - float(expected_s))
+        score = dist2 + s_bias * s_bias
+        if best_score is None or score < best_score:
+            best_score = score
+            best_idx = idx
+
+    if best_idx is None:
+        return None
+    return float(sim_index.sample_t[best_idx])
 
 
 def _safe_positive(value, *, fallback: float) -> float:

@@ -114,6 +114,9 @@ class MainWindow(WindowEventMixin, QMainWindow):
         # Initialize canvas with path
         self.canvas.set_path(self.path)
         self.timeline.set_path(self.path, self._timeline_config())
+        self.canvas.playbackStateChanged.connect(self.timeline.set_playback_state)
+        self.timeline.scrubRequested.connect(self.canvas.set_playback_time)
+        self.timeline.playPauseToggled.connect(self.canvas.toggle_play_pause)
         # Build initial simulation
         self.canvas.request_simulation_rebuild()
 

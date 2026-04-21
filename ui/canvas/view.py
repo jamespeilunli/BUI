@@ -61,7 +61,6 @@ from .items.elements import (
     EventTriggerItem,
 )
 from .items.sim import RobotSimItem
-from .components.transport import TransportControls
 
 
 def _get_translation_position(element: Any) -> Tuple[float, float]:
@@ -86,6 +85,7 @@ class CanvasView(QGraphicsView):
     deleteSelectedRequested = Signal()
     rotationDragFinished = Signal(int)
     constraintElementClicked = Signal(int)  # global element index clicked while popout active
+    playbackStateChanged = Signal(float, float, bool, bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -174,8 +174,6 @@ class CanvasView(QGraphicsView):
         self._trail_lines: List[QGraphicsLineItem] = []
         self._trail_points: List[Tuple[float, float]] = []
         self._trail_visible_count: int = 0
-        self.transport = TransportControls(self)
-        self.transport.ensure()
         self._range_overlay_lines: List[QGraphicsLineItem] = []
         self._range_overlay_saved_item_styles: dict[QGraphicsItem, Tuple[QPen, QBrush]] = {}
         # Constraint popout sync state
@@ -623,12 +621,10 @@ class CanvasView(QGraphicsView):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         QTimer.singleShot(0, self._fit_to_scene)
-        QTimer.singleShot(0, self.transport.position)
 
     def showEvent(self, event):
         super().showEvent(event)
         QTimer.singleShot(0, self._fit_to_scene)
-        QTimer.singleShot(0, self.transport.position)
 
     def _fit_to_scene(self):
         if self._is_fitting:
@@ -641,8 +637,6 @@ class CanvasView(QGraphicsView):
                     self.fitInView(rect, Qt.KeepAspectRatio)
                     if abs(self._zoom_factor - 1.0) > 1e-6:
                         self.scale(self._zoom_factor, self._zoom_factor)
-                    # After any fit/scale, reposition transport overlay to viewport corner
-                    QTimer.singleShot(0, self.transport.position)
                 except Exception:
                     pass
         finally:
@@ -1388,11 +1382,20 @@ class CanvasView(QGraphicsView):
             return float(self._sim_global_s_by_time.get(key_hint, 0.0))
         if not self._sim_times_sorted:
             return 0.0
-        idx = bisect.bisect_right(self._sim_times_sorted, t_s) - 1
-        if idx < 0:
-            idx = 0
-        selected = self._sim_times_sorted[idx]
-        return float(self._sim_global_s_by_time.get(selected, 0.0))
+        idx = bisect.bisect_left(self._sim_times_sorted, t_s)
+        if idx <= 0:
+            return float(self._sim_global_s_by_time.get(self._sim_times_sorted[0], 0.0))
+        if idx >= len(self._sim_times_sorted):
+            return float(self._sim_global_s_by_time.get(self._sim_times_sorted[-1], 0.0))
+
+        t0 = self._sim_times_sorted[idx - 1]
+        t1 = self._sim_times_sorted[idx]
+        s0 = float(self._sim_global_s_by_time.get(t0, 0.0))
+        s1 = float(self._sim_global_s_by_time.get(t1, s0))
+        if abs(t1 - t0) <= 1e-9:
+            return s1
+        alpha = max(0.0, min(1.0, (float(t_s) - float(t0)) / (float(t1) - float(t0))))
+        return s0 + alpha * (s1 - s0)
 
     def _update_protrusion_visibility_for_time(self, t_s: float, key_hint: Optional[float] = None):
         if not self.protrusion_enabled:
@@ -1501,12 +1504,23 @@ class CanvasView(QGraphicsView):
             pass
 
     # Transport control callbacks (public subset kept for TransportControls wiring)
+    def toggle_play_pause(self):
+        self._toggle_play_pause()
+
+    def set_playback_time(self, time_s: float):
+        try:
+            if self._sim_timer.isActive():
+                self._sim_timer.stop()
+            self._sim_current_time_s = max(0.0, min(float(time_s), self._sim_total_time_s))
+            self._seek_to_time(self._sim_current_time_s)
+            self._emit_playback_state_changed()
+        except Exception:
+            pass
+
     def _toggle_play_pause(self):
         try:
             if self._sim_timer.isActive():
                 self._sim_timer.stop()
-                if self.transport.btn:
-                    self.transport.btn.setText("▶")
                 self._update_sim_robot_visibility()
             else:
                 if not self._sim_times_sorted:
@@ -1514,23 +1528,16 @@ class CanvasView(QGraphicsView):
                 if self._sim_current_time_s >= self._sim_total_time_s:
                     self._sim_current_time_s = 0.0
                     self._seek_to_time(0.0)
-                    if self.transport.slider:
-                        self.transport.slider.blockSignals(True)
-                        self.transport.slider.setValue(0)
-                        self.transport.slider.blockSignals(False)
                     self._update_trail_visibility(0)
                 self._sim_timer.start()
-                if self.transport.btn:
-                    self.transport.btn.setText("⏸")
                 self._update_sim_robot_visibility()
+            self._emit_playback_state_changed()
         except Exception:
             pass
 
     def _on_slider_changed(self, value: int):
         try:
-            self._sim_current_time_s = float(value) / 10000.0
-            self._seek_to_time(self._sim_current_time_s)
-            self._update_sim_robot_visibility()
+            self.set_playback_time(float(value) / 10000.0)
         except Exception:
             pass
 
@@ -1538,9 +1545,8 @@ class CanvasView(QGraphicsView):
         try:
             if self._sim_timer.isActive():
                 self._sim_timer.stop()
-            if self.transport.btn:
-                self.transport.btn.setText("▶")
             self._update_sim_robot_visibility()
+            self._emit_playback_state_changed()
         except Exception:
             pass
 
@@ -1551,20 +1557,39 @@ class CanvasView(QGraphicsView):
         try:
             if not self._sim_times_sorted or not self._sim_poses_by_time:
                 return
-            idx = bisect.bisect_right(self._sim_times_sorted, t_s) - 1
-            if idx < 0:
-                idx = 0
-            key_index = idx
-            key = self._sim_times_sorted[idx]
-            x, y, th = self._sim_poses_by_time.get(
-                key, self._sim_poses_by_time[self._sim_times_sorted[0]]
-            )
+            idx = bisect.bisect_left(self._sim_times_sorted, t_s)
+            if idx <= 0:
+                key_index = 0
+                key = self._sim_times_sorted[0]
+                x, y, th = self._sim_poses_by_time.get(key, (0.0, 0.0, 0.0))
+            elif idx >= len(self._sim_times_sorted):
+                key_index = len(self._sim_times_sorted) - 1
+                key = self._sim_times_sorted[key_index]
+                x, y, th = self._sim_poses_by_time.get(key, (0.0, 0.0, 0.0))
+            else:
+                key_index = max(0, idx - 1)
+                t0 = self._sim_times_sorted[idx - 1]
+                t1 = self._sim_times_sorted[idx]
+                x0, y0, th0 = self._sim_poses_by_time.get(t0, (0.0, 0.0, 0.0))
+                x1, y1, th1 = self._sim_poses_by_time.get(t1, (x0, y0, th0))
+                if abs(t1 - t0) <= 1e-9:
+                    x, y, th = x1, y1, th1
+                    key = t1
+                else:
+                    alpha = max(
+                        0.0,
+                        min(1.0, (float(t_s) - float(t0)) / (float(t1) - float(t0))),
+                    )
+                    x = float(x0) + alpha * (float(x1) - float(x0))
+                    y = float(y0) + alpha * (float(y1) - float(y0))
+                    dth = math.atan2(math.sin(float(th1) - float(th0)), math.cos(float(th1) - float(th0)))
+                    th = float(th0) + alpha * dth
+                    key = None
             self._set_sim_robot_pose(x, y, th)
             self._update_trail_visibility(key_index)
             self._update_protrusion_visibility_for_time(t_s, key_hint=key)
-            if self.transport.label:
-                self.transport.label.setText(f"{t_s:.2f} / {self._sim_total_time_s:.2f} s")
             self._update_sim_robot_visibility()
+            self._emit_playback_state_changed()
         except Exception:
             pass
 
@@ -1572,19 +1597,12 @@ class CanvasView(QGraphicsView):
         try:
             if not self._sim_times_sorted:
                 self._sim_timer.stop()
-                if self.transport.btn:
-                    self.transport.btn.setText("▶")
-                    return
+                self._emit_playback_state_changed()
+                return
             self._sim_current_time_s += 0.02
             if self._sim_current_time_s >= self._sim_total_time_s:
                 self._sim_current_time_s = self._sim_total_time_s
                 self._sim_timer.stop()
-                if self.transport.btn:
-                    self.transport.btn.setText("▶")
-            if self.transport.slider:
-                self.transport.slider.blockSignals(True)
-                self.transport.slider.setValue(int(round(self._sim_current_time_s * 10000.0)))
-                self.transport.slider.blockSignals(False)
             self._seek_to_time(self._sim_current_time_s)
         except Exception:
             pass
@@ -1610,12 +1628,9 @@ class CanvasView(QGraphicsView):
                 if self._sim_robot_item:
                     self._sim_robot_item.setVisible(False)
                 self._clear_trail()
-                if self.transport.slider:
-                    self.transport.slider.setRange(0, 0)
-                if self.transport.label:
-                    self.transport.label.setText("0.00 / 0.00 s")
                 self._rebuild_protrusion_trigger_schedule()
                 self._set_protrusion_visible(self._default_protrusion_visible())
+                self._emit_playback_state_changed()
                 return
             cfg = {}
             try:
@@ -1654,13 +1669,6 @@ class CanvasView(QGraphicsView):
                     self._sim_global_s_by_time[tk] = s_val
                     last_s = s_val
             self._rebuild_protrusion_trigger_schedule()
-            if self.transport.slider:
-                self.transport.slider.blockSignals(True)
-                self.transport.slider.setRange(0, int(round(self._sim_total_time_s * 10000.0)))
-                self.transport.slider.setValue(0)
-                self.transport.slider.blockSignals(False)
-            if self.transport.label:
-                self.transport.label.setText(f"0.00 / {self._sim_total_time_s:.2f} s")
             if self._sim_robot_item and self._sim_times_sorted:
                 t0 = self._sim_times_sorted[0]
                 x, y, th = self._sim_poses_by_time.get(t0, (0.0, 0.0, 0.0))
@@ -1673,6 +1681,18 @@ class CanvasView(QGraphicsView):
                 self._setup_trail(result.trail_points)
             else:
                 self._clear_trail()
+            self._emit_playback_state_changed()
+        except Exception:
+            pass
+
+    def _emit_playback_state_changed(self):
+        try:
+            self.playbackStateChanged.emit(
+                float(self._sim_current_time_s),
+                float(self._sim_total_time_s),
+                bool(self._sim_timer.isActive()),
+                bool(self._sim_times_sorted),
+            )
         except Exception:
             pass
 
@@ -1720,11 +1740,6 @@ class CanvasView(QGraphicsView):
                 self._zoom_factor = new_zoom
             self.scale(factor, factor)
             event.accept()
-            # Keep transport overlay anchored after zooming
-            try:
-                self.transport.position()
-            except Exception:
-                pass
         except Exception:
             try:
                 super().wheelEvent(event)
@@ -1739,18 +1754,14 @@ class CanvasView(QGraphicsView):
 
     def _should_start_pan(self, pos) -> bool:
         """Return True if a left-click at view position pos should start panning.
-        Pan on empty/background areas; avoid panning on interactive items or the
-        transport overlay.
+        Pan on empty/background areas; avoid panning on interactive items.
         """
         try:
             item = self.itemAt(pos)
             if item is None:
                 return True
-            # Avoid panning when clicking the transport overlay
-            from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsProxyWidget
+            from PySide6.QtWidgets import QGraphicsPixmapItem
 
-            if isinstance(item, QGraphicsProxyWidget):
-                return False
             # Allow panning when clicking the background pixmap
             if isinstance(item, QGraphicsPixmapItem):
                 return True
@@ -1796,22 +1807,6 @@ class CanvasView(QGraphicsView):
         except Exception:
             pass
         super().mouseMoveEvent(event)
-
-        # Reposition overlay when the view scrolls due to any movement
-        try:
-            self.transport.position()
-        except Exception:
-            pass
-
-    def scrollContentsBy(self, dx: int, dy: int):
-        # Called for any programmatic or inertial scroll; keep overlay anchored
-        try:
-            super().scrollContentsBy(dx, dy)
-        finally:
-            try:
-                self.transport.position()
-            except Exception:
-                pass
 
     def mouseReleaseEvent(self, event):
         try:
