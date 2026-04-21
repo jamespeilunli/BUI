@@ -29,6 +29,7 @@ from models.path_model import (
     Waypoint,
 )
 from models.simulation import simulate_path
+from ui.canvas.constants import SIMULATION_UPDATE_INTERVAL_MS
 from ui.qt_compat import Qt, QSizePolicy
 from ui.sidebar.utils import RANGED_CONSTRAINT_KEYS, SPINNER_METADATA, SPINNER_UNITS
 from ui.sidebar.utils.ranged_constraint_ui import get_constraint_domain_elements
@@ -44,6 +45,7 @@ ROW_GAP = 8
 MIN_ZOOM_PX_PER_M = 24
 MAX_ZOOM_PX_PER_M = 240
 DEFAULT_ZOOM_PX_PER_M = 72
+PLAYBACK_STEP_S = SIMULATION_UPDATE_INTERVAL_MS / 1000.0
 
 
 @dataclass
@@ -185,6 +187,8 @@ class _TimelineRailCanvas(_TimelineCanvasBase):
 class _TimelineTrackCanvas(_TimelineCanvasBase):
     scrubRequested = Signal(float)
     playPauseToggleRequested = Signal()
+    zoomInRequested = Signal()
+    zoomOutRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -196,6 +200,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._pressed_on_playhead = False
         self.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)
 
     def set_zoom_px_per_m(self, zoom_px_per_m: int) -> None:
         self._zoom_px_per_m = max(MIN_ZOOM_PX_PER_M, min(MAX_ZOOM_PX_PER_M, int(zoom_px_per_m)))
@@ -423,6 +428,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() != Qt.LeftButton:
             return super().mousePressEvent(event)
+        self.setFocus(Qt.MouseFocusReason)
         self._scrub_active = True
         self._scrub_moved = False
         self._pressed_on_playhead = self._is_playhead_click(event)
@@ -470,6 +476,34 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         playhead_x = self._x_for_s(self._playhead_s_m)
         return abs(x - playhead_x) <= 8.0 and y <= (TOP_PADDING + RULER_HEIGHT)
 
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        key = event.key()
+        modifiers = event.modifiers()
+        if modifiers & Qt.ControlModifier:
+            if key in (Qt.Key_Plus, Qt.Key_Equal):
+                self.zoomInRequested.emit()
+                event.accept()
+                return
+            if key == Qt.Key_Minus:
+                self.zoomOutRequested.emit()
+                event.accept()
+                return
+        if key == Qt.Key_Space:
+            self.playPauseToggleRequested.emit()
+            event.accept()
+            return
+        if key == Qt.Key_Left:
+            self.scrubRequested.emit(max(0.0, self._playhead_s_m - PLAYBACK_STEP_S))
+            event.accept()
+            return
+        if key == Qt.Key_Right:
+            self.scrubRequested.emit(
+                min(float(self._projection.display_s_m), self._playhead_s_m + PLAYBACK_STEP_S)
+            )
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
 
 class TimelineDock(QFrame):
     """Timeline dock with editor-style playhead transport."""
@@ -485,6 +519,7 @@ class TimelineDock(QFrame):
         self._current_time_s = 0.0
         self._total_time_s = 0.0
         self._is_playing = False
+        self._play_pause_btn: QPushButton
         self._playback_label: QLabel
         self._summary_label: QLabel
         self._zoom_label: QLabel
@@ -502,6 +537,7 @@ class TimelineDock(QFrame):
         self.setFrameShape(QFrame.NoFrame)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMinimumHeight(220)
+        self.setFocusPolicy(Qt.StrongFocus)
         self.setStyleSheet(
             """
             QFrame#timelineDock {
@@ -577,6 +613,12 @@ class TimelineDock(QFrame):
         self._playback_label.setObjectName("timelinePlaybackLabel")
         toolbar_layout.addWidget(self._playback_label)
 
+        self._play_pause_btn = QPushButton("Play")
+        self._play_pause_btn.setProperty("timelineControl", "true")
+        self._play_pause_btn.setEnabled(False)
+        self._play_pause_btn.clicked.connect(self._on_play_pause_toggled)
+        toolbar_layout.addWidget(self._play_pause_btn)
+
         zoom_out_btn = QPushButton("-")
         zoom_out_btn.setProperty("timelineControl", "true")
         zoom_out_btn.clicked.connect(lambda: self._adjust_zoom(-10))
@@ -630,7 +672,10 @@ class TimelineDock(QFrame):
         self._track_canvas = _TimelineTrackCanvas()
         self._track_canvas.scrubRequested.connect(self._on_scrub_requested)
         self._track_canvas.playPauseToggleRequested.connect(self._on_play_pause_toggled)
+        self._track_canvas.zoomInRequested.connect(lambda: self._adjust_zoom(10))
+        self._track_canvas.zoomOutRequested.connect(lambda: self._adjust_zoom(-10))
         self._track_scroll.setWidget(self._track_canvas)
+        self._track_scroll.setFocusProxy(self._track_canvas)
         body_layout.addWidget(self._track_scroll, 1)
         outer.addWidget(body, 1)
 
@@ -688,23 +733,26 @@ class TimelineDock(QFrame):
         state_text = "Playing" if self._is_playing else "Paused"
         if not enabled or self._total_time_s <= 1e-9:
             state_text = "No simulation"
+        self._play_pause_btn.setEnabled(bool(enabled and self._total_time_s > 1e-9))
+        self._play_pause_btn.setText("Pause" if self._is_playing else "Play")
         self._playback_label.setText(
             f"{state_text} at {self._current_time_s:.2f} / {self._total_time_s:.2f} s"
         )
         self._ensure_playhead_visible()
 
     def _on_zoom_changed(self, value: int) -> None:
-        old_zoom = getattr(self._track_canvas, "_zoom_px_per_m", DEFAULT_ZOOM_PX_PER_M)
         hbar = self._track_scroll.horizontalScrollBar()
-        viewport_center_x = hbar.value() + (self._track_scroll.viewport().width() / 2.0)
-        focused_s = max(0.0, (viewport_center_x - TRACK_PADDING_X) / max(1.0, float(old_zoom)))
+        playhead_x_before = TRACK_PADDING_X + self._current_time_s * float(
+            self._track_canvas._zoom_px_per_m
+        )
+        playhead_offset_in_view = playhead_x_before - float(hbar.value())
 
         self._zoom_label.setText(f"{int(value)} px/m")
         self._track_canvas.set_zoom_px_per_m(value)
         self._sync_canvas_size()
 
-        new_center_x = TRACK_PADDING_X + focused_s * float(value)
-        hbar.setValue(int(round(new_center_x - (self._track_scroll.viewport().width() / 2.0))))
+        playhead_x_after = TRACK_PADDING_X + self._current_time_s * float(value)
+        hbar.setValue(int(round(playhead_x_after - playhead_offset_in_view)))
 
     def _sync_canvas_size(self) -> None:
         rail_hint = self._rail_canvas.sizeHint()
@@ -733,6 +781,39 @@ class TimelineDock(QFrame):
 
     def _on_play_pause_toggled(self) -> None:
         self.playPauseToggled.emit()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        key = event.key()
+        modifiers = event.modifiers()
+        if modifiers & Qt.ControlModifier:
+            if key in (Qt.Key_Plus, Qt.Key_Equal):
+                self._adjust_zoom(10)
+                event.accept()
+                return
+            if key == Qt.Key_Minus:
+                self._adjust_zoom(-10)
+                event.accept()
+                return
+        if key == Qt.Key_Space:
+            self._on_play_pause_toggled()
+            event.accept()
+            return
+        if key == Qt.Key_Left:
+            self._step_playhead(-1)
+            event.accept()
+            return
+        if key == Qt.Key_Right:
+            self._step_playhead(1)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def _step_playhead(self, direction: int) -> None:
+        if self._total_time_s <= 1e-9:
+            return
+        target_time_s = self._current_time_s + (PLAYBACK_STEP_S * int(direction))
+        target_time_s = max(0.0, min(float(target_time_s), self._total_time_s))
+        self.scrubRequested.emit(target_time_s)
 
     def _ensure_playhead_visible(self) -> None:
         hbar = self._track_scroll.horizontalScrollBar()
