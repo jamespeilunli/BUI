@@ -101,9 +101,11 @@ class Sidebar(QWidget):
             main_layout.setContentsMargins(0, 0, 0, 0)
         except Exception:
             pass
-        # Lock the entire sidebar to a fixed width so it doesn't resize
-        self.setFixedWidth(300)
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        # Keep the sidebar compact by default, but allow the main window splitter
+        # to widen or narrow it during the redesign.
+        self.setMinimumWidth(280)
+        self.resize(300, self.height())
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
         # Top section: Path Elements title bar with add button
         self._create_path_elements_bar(main_layout)

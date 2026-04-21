@@ -2,6 +2,7 @@
 from PySide6.QtWidgets import (
     QMainWindow,
     QHBoxLayout,
+    QSplitter,
     QWidget,
     QFileDialog,
     QMenuBar,
@@ -31,6 +32,7 @@ from ..sidebar import Sidebar
 from ..sidebar.utils import clamp_from_metadata
 from models.path_model import TranslationTarget, RotationTarget, Waypoint, Path, EventTrigger
 from ..canvas import CanvasView, FIELD_LENGTH_METERS, FIELD_WIDTH_METERS
+from ..timeline import TimelinePlaceholder
 from typing import Tuple, Optional
 from utils.project_manager import ProjectManager
 from utils.undo_system import UndoRedoManager, PathCommand, ConfigCommand
@@ -69,30 +71,32 @@ class MainWindow(WindowEventMixin, QMainWindow):
         central.setAttribute(Qt.WA_StyledBackground, True)
         central.setAutoFillBackground(True)
         self.setCentralWidget(central)
-        layout = QHBoxLayout(central)  # Horizontal split
+        layout = QHBoxLayout(central)
         try:
-            # Eliminate outer margins so both canvas and sidebar bottoms align to window bottom
             layout.setContentsMargins(0, 0, 0, 0)
             layout.setSpacing(0)
         except Exception:
             pass
 
-        # Canvas (left)
-        # Initialize canvas with default robot dims; will update after config load
-        self.canvas = CanvasView()
-        layout.addWidget(self.canvas, stretch=3)  # Wider
+        self.workspace_splitter = QSplitter(Qt.Horizontal)
+        self.workspace_splitter.setObjectName("mainWorkspaceSplitter")
+        self.workspace_splitter.setChildrenCollapsible(False)
+        self.workspace_splitter.setHandleWidth(6)
+        layout.addWidget(self.workspace_splitter)
 
-        # Thin vertical divider between canvas and sidebar
-        try:
-            divider = QFrame()
-            divider.setObjectName("sidebarDivider")
-            divider.setFrameShape(QFrame.NoFrame)
-            divider.setFixedWidth(1)
-            divider.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-            divider.setStyleSheet("QFrame#sidebarDivider { background-color: #3b3b3b; }")
-            layout.addWidget(divider)
-        except Exception:
-            pass
+        self.editor_splitter = QSplitter(Qt.Vertical)
+        self.editor_splitter.setObjectName("editorSplitter")
+        self.editor_splitter.setChildrenCollapsible(False)
+        self.editor_splitter.setHandleWidth(6)
+        self.workspace_splitter.addWidget(self.editor_splitter)
+
+        # Canvas (top-left)
+        self.canvas = CanvasView()
+        self.editor_splitter.addWidget(self.canvas)
+
+        # Timeline dock shell (bottom-left)
+        self.timeline = TimelinePlaceholder(self.path)
+        self.editor_splitter.addWidget(self.timeline)
 
         # Placeholder for sidebar (right)
         self.sidebar = Sidebar()
@@ -103,10 +107,13 @@ class MainWindow(WindowEventMixin, QMainWindow):
         # Connect canvas to undo manager (no longer needed for toolbar, but keep for other features)
         # self.canvas.set_undo_redo_manager(self.undo_manager)
         self.sidebar.set_path(self.path)
-        layout.addWidget(self.sidebar, stretch=1)  # Narrower
+        self.workspace_splitter.addWidget(self.sidebar)
+
+        self._configure_splitters()
 
         # Initialize canvas with path
         self.canvas.set_path(self.path)
+        self.timeline.set_path(self.path)
         # Build initial simulation
         self.canvas.request_simulation_rebuild()
 
@@ -158,8 +165,10 @@ class MainWindow(WindowEventMixin, QMainWindow):
         self.sidebar.modelChanged.connect(self.canvas.refresh_from_model)
         self.sidebar.modelChanged.connect(self.canvas.update_handoff_radius_visualizers)
         self.sidebar.modelChanged.connect(self.canvas.request_simulation_rebuild)
+        self.sidebar.modelChanged.connect(lambda: self.timeline.set_path(self.path))
         self.sidebar.modelStructureChanged.connect(lambda: self.canvas.set_path(self.path))
         self.sidebar.modelStructureChanged.connect(self.canvas.request_simulation_rebuild)
+        self.sidebar.modelStructureChanged.connect(lambda: self.timeline.set_path(self.path))
         # Global UI clicks: clear ranged overlay unless the click target is a range-related control
         try:
             app = QApplication.instance()
@@ -213,6 +222,46 @@ class MainWindow(WindowEventMixin, QMainWindow):
         self._config_edit_old_config: dict | None = None
         # Mark sidebar ready after initial layout
         QTimer.singleShot(0, self.sidebar.mark_ready)
+        QTimer.singleShot(0, self._apply_default_splitter_sizes)
+
+    def _configure_splitters(self):
+        """Set splitter styling and stretch behavior for the three-pane shell."""
+        try:
+            for splitter in (self.workspace_splitter, self.editor_splitter):
+                splitter.setStyleSheet(
+                    """
+                    QSplitter {
+                        background: #111111;
+                    }
+                    QSplitter::handle {
+                        background: #1e1e1e;
+                    }
+                    QSplitter::handle:hover {
+                        background: #2a2a2a;
+                    }
+                    """
+                )
+            self.workspace_splitter.setStretchFactor(0, 1)
+            self.workspace_splitter.setStretchFactor(1, 0)
+            self.editor_splitter.setStretchFactor(0, 1)
+            self.editor_splitter.setStretchFactor(1, 0)
+        except Exception:
+            pass
+
+    def _apply_default_splitter_sizes(self):
+        """Apply Phase 1 default proportions after the window has geometry."""
+        try:
+            total_width = max(self.centralWidget().width(), 1000)
+            total_height = max(self.centralWidget().height(), 600)
+            sidebar_width = max(280, min(340, int(total_width * 0.24)))
+            left_width = max(520, total_width - sidebar_width)
+            timeline_height = max(180, int(total_height * 0.32))
+            field_height = max(260, total_height - timeline_height)
+
+            self.workspace_splitter.setSizes([left_width, sidebar_width])
+            self.editor_splitter.setSizes([field_height, timeline_height])
+        except Exception:
+            pass
 
     def _delete_selected_element(self):
         idx = self.sidebar.get_selected_index()
@@ -486,6 +535,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
         """Refresh all UI components after an undo/redo operation."""
         # Refresh canvas from model
         self.canvas.set_path(self.path)
+        self.timeline.set_path(self.path)
         self.canvas.refresh_from_model()
         self.canvas.update_handoff_radius_visualizers()
         self.canvas.request_simulation_rebuild()
@@ -1074,6 +1124,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
         self.path = path
         self.sidebar.set_path(self.path)
         self.canvas.set_path(self.path)
+        self.timeline.set_path(self.path)
         # Update the current path display
         self._update_current_path_display()
         # Only autosave if this is a new path being created, not when loading existing paths
