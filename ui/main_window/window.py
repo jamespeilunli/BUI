@@ -125,27 +125,88 @@ class MainWindow(WindowEventMixin, QMainWindow):
             lambda index: self.canvas.select_index(index, center_on_item=False),
             Qt.QueuedConnection,
         )
+        self.sidebar.elementSelected.connect(self.timeline.select_path_index, Qt.QueuedConnection)
         self.canvas.elementSelected.connect(
             lambda index: self.sidebar.select_index(index, propagate_to_canvas=False),
             Qt.QueuedConnection,
         )
+        self.canvas.elementSelected.connect(self.timeline.select_path_index, Qt.QueuedConnection)
         self.canvas.elementSelected.connect(
             lambda _: self.sidebar.clear_active_preview(), Qt.QueuedConnection
         )
+        self.canvas.elementSelected.connect(
+            lambda _: self.canvas.clear_constraint_segment_highlight(),
+            Qt.QueuedConnection,
+        )
         self.canvas.selectionCleared.connect(self.sidebar.clear_selection, Qt.QueuedConnection)
+        self.canvas.selectionCleared.connect(self.timeline.clear_selection, Qt.QueuedConnection)
         self.canvas.selectionCleared.connect(
             lambda: self.sidebar.clear_active_preview(), Qt.QueuedConnection
+        )
+        self.canvas.selectionCleared.connect(
+            lambda: self.canvas.clear_constraint_segment_highlight(),
+            Qt.QueuedConnection,
         )
         # Ranged constraints preview from sidebar -> canvas overlay
         try:
             self.sidebar.constraintRangePreviewRequested.connect(
                 lambda key, s, e: self.canvas.show_constraint_range_overlay(key, s, e)
             )
+            self.sidebar.constraintRangePreviewRequested.connect(
+                lambda key, s, e: self.canvas.set_constraint_segment_highlight(key, s, e)
+            )
+            self.sidebar.constraintRangePreviewRequested.connect(
+                lambda key, s, e: self.timeline.select_constraint_range(key, s, e)
+            )
             self.sidebar.constraintRangePreviewCleared.connect(
                 lambda: self.canvas.clear_constraint_range_overlay()
             )
+            self.sidebar.constraintRangePreviewCleared.connect(
+                lambda: self.canvas.clear_constraint_segment_highlight()
+            )
+            self.sidebar.constraintRangePreviewCleared.connect(
+                lambda: self.timeline.clear_constraint_selection()
+            )
         except Exception:
             pass
+
+        self.timeline.pathItemSelected.connect(
+            lambda index: self.sidebar.select_index(index, propagate_to_canvas=True),
+            Qt.QueuedConnection,
+        )
+        self.timeline.pathItemSelected.connect(
+            lambda _: self.canvas.clear_constraint_segment_highlight(),
+            Qt.QueuedConnection,
+        )
+        self.timeline.constraintRangeSelected.connect(
+            lambda key, s, e: self.sidebar.select_constraint_range(key, s, e, emit_preview=False),
+            Qt.QueuedConnection,
+        )
+        self.timeline.constraintRangeSelected.connect(
+            lambda key, s, e: self.canvas.show_constraint_range_overlay(key, s, e),
+            Qt.QueuedConnection,
+        )
+        self.timeline.constraintRangeSelected.connect(
+            lambda key, s, e: self.canvas.set_constraint_segment_highlight(key, s, e),
+            Qt.QueuedConnection,
+        )
+        self.timeline.selectionCleared.connect(self.sidebar.clear_selection, Qt.QueuedConnection)
+        self.timeline.selectionCleared.connect(
+            lambda: self.canvas.clear_selection(),
+            Qt.QueuedConnection,
+        )
+        self.timeline.selectionCleared.connect(
+            lambda: self.sidebar.clear_active_preview(),
+            Qt.QueuedConnection,
+        )
+        self.timeline.selectionCleared.connect(
+            lambda: self.canvas.clear_constraint_range_overlay(),
+            Qt.QueuedConnection,
+        )
+        self.timeline.selectionCleared.connect(
+            lambda: self.canvas.clear_constraint_segment_highlight(),
+            Qt.QueuedConnection,
+        )
 
         # Constraint popout <-> canvas sync
         try:

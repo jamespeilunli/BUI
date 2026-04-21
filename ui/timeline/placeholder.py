@@ -54,6 +54,7 @@ class TimelineMarker:
     label: str
     kind: str
     color: str
+    path_index: int | None = None
     source_x_m: float | None = None
     source_y_m: float | None = None
 
@@ -65,6 +66,9 @@ class TimelineSpan:
     label: str
     color: str
     lane: int = 0
+    constraint_key: str | None = None
+    start_ordinal: int | None = None
+    end_ordinal: int | None = None
 
 
 @dataclass
@@ -85,6 +89,15 @@ class TimelineProjection:
     rows: list[TimelineRow]
     axis_label: str = "Path Progress"
     axis_unit: str = "m"
+
+
+@dataclass
+class TimelineSelection:
+    kind: str
+    path_index: int | None = None
+    constraint_key: str | None = None
+    start_ordinal: int | None = None
+    end_ordinal: int | None = None
 
 
 @dataclass
@@ -189,15 +202,20 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     playPauseToggleRequested = Signal()
     zoomInRequested = Signal()
     zoomOutRequested = Signal()
+    pathItemClicked = Signal(int)
+    constraintSpanClicked = Signal(str, int, int)
+    emptyAreaClicked = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._zoom_px_per_m = DEFAULT_ZOOM_PX_PER_M
         self._playhead_s_m = 0.0
         self._is_playing = False
+        self._selection: TimelineSelection | None = None
         self._scrub_active = False
         self._scrub_moved = False
         self._pressed_on_playhead = False
+        self._pressed_hit: tuple[str, object] | None = None
         self.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -211,6 +229,10 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         max_s = max(0.0, float(self._projection.display_s_m))
         self._playhead_s_m = max(0.0, min(float(s_m), max_s))
         self._is_playing = bool(playing)
+        self.update()
+
+    def set_selection(self, selection: TimelineSelection | None) -> None:
+        self._selection = selection
         self.update()
 
     def sizeHint(self) -> QSize:
@@ -308,6 +330,12 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             color = QColor(marker.color)
             painter.setPen(QPen(color, 1.4))
             painter.drawLine(int(x), int(track_rect.top()), int(x), int(track_rect.bottom()))
+            if self._is_marker_selected(marker):
+                painter.save()
+                painter.setPen(QPen(QColor("#f5f7fa"), 1.4))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawEllipse(QRectF(x - 9.0, center_y - 9.0, 18.0, 18.0))
+                painter.restore()
             self._draw_marker_shape(painter, marker.kind, x, center_y, color)
 
             label = marker.label.strip()
@@ -387,8 +415,16 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             color = QColor(span.color)
             fill = QColor(color)
             fill.setAlpha(220)
+            if self._is_span_selected(span):
+                fill = QColor(color.lighter(118))
+                fill.setAlpha(245)
 
-            painter.setPen(QPen(color.lighter(120), 1.1))
+            pen_color = color.lighter(120)
+            pen_width = 1.1
+            if self._is_span_selected(span):
+                pen_color = QColor("#f4f7fa")
+                pen_width = 1.5
+            painter.setPen(QPen(pen_color, pen_width))
             painter.setBrush(fill)
             painter.drawRect(rect)
 
@@ -429,10 +465,13 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         if event.button() != Qt.LeftButton:
             return super().mousePressEvent(event)
         self.setFocus(Qt.MouseFocusReason)
-        self._scrub_active = True
+        self._pressed_hit = self._hit_test(event.position().x(), event.position().y())
+        self._scrub_active = bool(
+            self._pressed_hit is None and self._y_in_ruler(float(event.position().y()))
+        )
         self._scrub_moved = False
         self._pressed_on_playhead = self._is_playhead_click(event)
-        if not self._pressed_on_playhead:
+        if self._scrub_active and not self._pressed_on_playhead:
             self._emit_scrub_for_event(event)
         event.accept()
 
@@ -446,6 +485,10 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if not self._scrub_active or event.button() != Qt.LeftButton:
+            if event.button() == Qt.LeftButton and not self._scrub_moved:
+                self._activate_click_hit(event)
+                event.accept()
+                return
             return super().mouseReleaseEvent(event)
 
         if self._scrub_moved or not self._pressed_on_playhead:
@@ -454,6 +497,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._scrub_active = False
         self._scrub_moved = False
         self._pressed_on_playhead = False
+        self._pressed_hit = None
         if should_toggle:
             self.playPauseToggleRequested.emit()
         event.accept()
@@ -475,6 +519,108 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         y = float(event.position().y())
         playhead_x = self._x_for_s(self._playhead_s_m)
         return abs(x - playhead_x) <= 8.0 and y <= (TOP_PADDING + RULER_HEIGHT)
+
+    def _activate_click_hit(self, event: QMouseEvent) -> None:
+        hit = self._hit_test(event.position().x(), event.position().y())
+        pressed_hit = self._pressed_hit
+        self._pressed_hit = None
+        self._scrub_moved = False
+        self._pressed_on_playhead = False
+        if hit is None or hit != pressed_hit:
+            self.emptyAreaClicked.emit()
+            return
+        hit_kind, payload = hit
+        if hit_kind == "marker":
+            marker = payload
+            if marker.path_index is not None:
+                self.pathItemClicked.emit(int(marker.path_index))
+            return
+        if hit_kind == "span":
+            span = payload
+            if (
+                span.constraint_key
+                and span.start_ordinal is not None
+                and span.end_ordinal is not None
+            ):
+                self.constraintSpanClicked.emit(
+                    str(span.constraint_key),
+                    int(span.start_ordinal),
+                    int(span.end_ordinal),
+                )
+                return
+        self.emptyAreaClicked.emit()
+
+    def _hit_test(self, x: float, y: float) -> tuple[str, object] | None:
+        if self._y_in_ruler(y):
+            return None
+        row_top = TOP_PADDING + RULER_HEIGHT
+        for row in self._projection.rows:
+            row_h = _row_height_for(row)
+            if row_top <= y <= row_top + row_h:
+                track_rect = QRectF(
+                    self._track_left(),
+                    row_top + 7,
+                    self._track_width(),
+                    max(10.0, row_h - 14),
+                )
+                if row.spans:
+                    for span, rect in self._iter_span_rects(row, track_rect):
+                        if rect.adjusted(-3.0, -2.0, 3.0, 2.0).contains(x, y):
+                            return ("span", span)
+                if row.markers:
+                    center_y = track_rect.center().y()
+                    for marker in row.markers:
+                        marker_rect = QRectF(
+                            self._x_for_s(marker.s_m) - 9.0,
+                            center_y - 11.0,
+                            18.0,
+                            22.0,
+                        )
+                        if marker_rect.contains(x, y):
+                            return ("marker", marker)
+                return None
+            row_top += row_h + ROW_GAP
+        return None
+
+    def _iter_span_rects(self, row: TimelineRow, track_rect: QRectF):
+        lane_count = max(1, int(row.lane_count))
+        lane_gap = 4.0
+        total_lane_gap = lane_gap * max(0, lane_count - 1)
+        available_h = max(10.0, track_rect.height())
+        lane_h = max(10.0, (available_h - total_lane_gap) / lane_count)
+        lanes_block_h = lane_count * lane_h + total_lane_gap
+        lanes_top = track_rect.top() + (available_h - lanes_block_h) / 2.0
+        for span in row.spans:
+            x0 = self._x_for_s(span.start_s_m)
+            x1 = self._x_for_s(span.end_s_m)
+            if x1 < x0:
+                x0, x1 = x1, x0
+            center_x = (x0 + x1) / 2.0
+            width = max(8.0, x1 - x0)
+            left_x = center_x - (width / 2.0)
+            lane_index = max(0, int(getattr(span, "lane", 0)))
+            bar_y = lanes_top + lane_index * (lane_h + lane_gap)
+            yield span, QRectF(left_x, bar_y, width, lane_h)
+
+    def _y_in_ruler(self, y: float) -> bool:
+        return TOP_PADDING <= y <= (TOP_PADDING + RULER_HEIGHT)
+
+    def _is_marker_selected(self, marker: TimelineMarker) -> bool:
+        return bool(
+            self._selection
+            and self._selection.kind == "path"
+            and marker.path_index is not None
+            and int(marker.path_index) == int(self._selection.path_index)
+        )
+
+    def _is_span_selected(self, span: TimelineSpan) -> bool:
+        return bool(
+            self._selection
+            and self._selection.kind == "constraint"
+            and span.constraint_key == self._selection.constraint_key
+            and span.start_ordinal == self._selection.start_ordinal
+            and span.end_ordinal == self._selection.end_ordinal
+        )
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         key = event.key()
@@ -510,12 +656,16 @@ class TimelineDock(QFrame):
 
     scrubRequested = Signal(float)
     playPauseToggled = Signal()
+    pathItemSelected = Signal(int)
+    constraintRangeSelected = Signal(str, int, int)
+    selectionCleared = Signal()
 
     def __init__(self, path: Path | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._path: Path | None = None
         self._config: dict[str, object] = {}
         self._projection = TimelineProjection(0.0, 6.0, "", [])
+        self._selection: TimelineSelection | None = None
         self._current_time_s = 0.0
         self._total_time_s = 0.0
         self._is_playing = False
@@ -674,6 +824,11 @@ class TimelineDock(QFrame):
         self._track_canvas.playPauseToggleRequested.connect(self._on_play_pause_toggled)
         self._track_canvas.zoomInRequested.connect(lambda: self._adjust_zoom(10))
         self._track_canvas.zoomOutRequested.connect(lambda: self._adjust_zoom(-10))
+        self._track_canvas.pathItemClicked.connect(self.select_path_index)
+        self._track_canvas.pathItemClicked.connect(self.pathItemSelected)
+        self._track_canvas.constraintSpanClicked.connect(self.select_constraint_range)
+        self._track_canvas.constraintSpanClicked.connect(self.constraintRangeSelected)
+        self._track_canvas.emptyAreaClicked.connect(self._on_empty_area_clicked)
         self._track_scroll.setWidget(self._track_canvas)
         self._track_scroll.setFocusProxy(self._track_canvas)
         body_layout.addWidget(self._track_scroll, 1)
@@ -703,6 +858,7 @@ class TimelineDock(QFrame):
         self._summary_label.setText(self._projection.summary_text)
         self._rail_canvas.set_projection(self._projection)
         self._track_canvas.set_projection(self._projection)
+        self._restore_selection()
         self._track_canvas.set_playhead(self._current_time_s, self._is_playing)
         self._sync_canvas_size()
         self.fit_to_all()
@@ -781,6 +937,76 @@ class TimelineDock(QFrame):
 
     def _on_play_pause_toggled(self) -> None:
         self.playPauseToggled.emit()
+
+    def select_path_index(self, index: int | None) -> None:
+        if index is None:
+            self.clear_selection()
+            return
+        selection = TimelineSelection(kind="path", path_index=int(index))
+        if self._selection == selection:
+            return
+        self._selection = selection
+        self._track_canvas.set_selection(self._selection)
+
+    def select_constraint_range(
+        self,
+        key: str | None,
+        start_ordinal: int | None,
+        end_ordinal: int | None,
+    ) -> None:
+        if not key or start_ordinal is None or end_ordinal is None:
+            self.clear_selection()
+            return
+        selection = TimelineSelection(
+            kind="constraint",
+            constraint_key=str(key),
+            start_ordinal=int(start_ordinal),
+            end_ordinal=int(end_ordinal),
+        )
+        if self._selection == selection:
+            return
+        self._selection = selection
+        self._track_canvas.set_selection(self._selection)
+
+    def clear_selection(self) -> None:
+        if self._selection is None:
+            return
+        self._selection = None
+        self._track_canvas.set_selection(None)
+
+    def clear_constraint_selection(self) -> None:
+        if self._selection is None or self._selection.kind != "constraint":
+            return
+        self.clear_selection()
+
+    def _restore_selection(self) -> None:
+        if self._selection is None:
+            self._track_canvas.set_selection(None)
+            return
+        if self._selection.kind == "path":
+            index = self._selection.path_index
+            if index is None or index < 0 or index >= len(getattr(self._path, "path_elements", []) or []):
+                self._selection = None
+        elif self._selection.kind == "constraint":
+            key = self._selection.constraint_key
+            start = self._selection.start_ordinal
+            end = self._selection.end_ordinal
+            found = False
+            for rc in getattr(self._path, "ranged_constraints", []) or []:
+                if (
+                    getattr(rc, "key", None) == key
+                    and int(getattr(rc, "start_ordinal", -1)) == int(start)
+                    and int(getattr(rc, "end_ordinal", -1)) == int(end)
+                ):
+                    found = True
+                    break
+            if not found:
+                self._selection = None
+        self._track_canvas.set_selection(self._selection)
+
+    def _on_empty_area_clicked(self) -> None:
+        self.clear_selection()
+        self.selectionCleared.emit()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         key = event.key()
@@ -874,6 +1100,7 @@ def _build_projection(
                 "Start",
                 "start",
                 "#5ac878",
+                path_index=anchor_data["anchor_indices"][0],
                 source_x_m=_element_x(first_anchor),
                 source_y_m=_element_y(first_anchor),
             )
@@ -886,6 +1113,7 @@ def _build_projection(
                     "End",
                     "end",
                     "#d96a6a",
+                    path_index=anchor_data["anchor_indices"][-1],
                     source_x_m=_element_x(last_anchor),
                     source_y_m=_element_y(last_anchor),
                 )
@@ -902,6 +1130,7 @@ def _build_projection(
                     f"T{translation_count}",
                     "translation",
                     "#60b7ff",
+                    path_index=index,
                     source_x_m=_element_x(element),
                     source_y_m=_element_y(element),
                 )
@@ -915,18 +1144,33 @@ def _build_projection(
                     f"W{waypoint_count}",
                     "waypoint",
                     "#9c8cff",
+                    path_index=index,
                     source_x_m=_element_x(element),
                     source_y_m=_element_y(element),
                 )
             )
         elif isinstance(element, RotationTarget):
             rotation_count += 1
-            structure_markers.append(TimelineMarker(s_m, f"R{rotation_count}", "rotation", "#ff9c5a"))
+            structure_markers.append(
+                TimelineMarker(
+                    s_m,
+                    f"R{rotation_count}",
+                    "rotation",
+                    "#ff9c5a",
+                    path_index=index,
+                )
+            )
         elif isinstance(element, EventTrigger):
             event_count += 1
             lib_key = str(getattr(element, "lib_key", "") or "").strip()
             trigger_markers.append(
-                TimelineMarker(s_m, lib_key or f"E{event_count}", "event", "#ffd166")
+                TimelineMarker(
+                    s_m,
+                    lib_key or f"E{event_count}",
+                    "event",
+                    "#ffd166",
+                    path_index=index,
+                )
             )
 
     rows = [
@@ -1101,6 +1345,9 @@ def _build_constraint_spans(
                 end_s_m=float(end_s),
                 label=label,
                 color=_constraint_color(key),
+                constraint_key=key,
+                start_ordinal=start_ord,
+                end_ordinal=end_ord,
             )
         )
 
@@ -1203,6 +1450,9 @@ def _build_constraint_spans_from_positions(
                 end_s_m=float(end_s),
                 label=label,
                 color=_constraint_color(key),
+                constraint_key=key,
+                start_ordinal=start_ord,
+                end_ordinal=end_ord,
             )
         )
 

@@ -1381,6 +1381,27 @@ class Sidebar(QWidget):
         """Clear active constraint preview."""
         self.constraint_manager.clear_active_preview()
 
+    def select_constraint_range(
+        self,
+        key: str,
+        start_ordinal: int,
+        end_ordinal: int,
+        *,
+        emit_preview: bool = True,
+    ) -> bool:
+        """Select a specific ranged-constraint segment in the sidebar controls."""
+        try:
+            return bool(
+                self.constraint_manager.select_segment_by_ordinals(
+                    key,
+                    start_ordinal,
+                    end_ordinal,
+                    emit_preview=emit_preview,
+                )
+            )
+        except Exception:
+            return False
+
     def is_widget_range_related(self, widget: QWidget) -> bool:
         """Check if widget is range-related."""
         return self.constraint_manager.is_widget_range_related(widget)

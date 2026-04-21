@@ -1034,6 +1034,30 @@ class ConstraintManager(QObject):
             self._active_preview_key = key
             self.constraintRangePreviewRequested.emit(key, rc.start_ordinal, rc.end_ordinal)
 
+    def select_segment_by_ordinals(
+        self,
+        key: str,
+        start_ordinal: int,
+        end_ordinal: int,
+        *,
+        emit_preview: bool = True,
+    ) -> bool:
+        """Select a ranged-constraint segment matching exact ordinals."""
+        rc_list = self._segment_rc_lists.get(key, [])
+        for idx, rc in enumerate(rc_list):
+            if (
+                int(getattr(rc, "start_ordinal", -1)) == int(start_ordinal)
+                and int(getattr(rc, "end_ordinal", -1)) == int(end_ordinal)
+            ):
+                bar = self._segment_bars.get(key)
+                if bar is not None:
+                    bar.blockSignals(True)
+                    bar.set_selected_index(idx)
+                    bar.blockSignals(False)
+                self._on_segment_selected(key, idx, emit_preview=emit_preview)
+                return True
+        return False
+
     def refresh_active_preview(self):
         """Refresh the preview for the currently active constraint key."""
         if self._active_preview_key is not None:

@@ -77,7 +77,7 @@ Objective:
 
 Tasks:
 
-- [ ] Clicking a timeline item selects the matching canvas/sidebar item
+- [ ] Clicking a timeline item selects the matching canvas item
 - [ ] Canvas selection highlights the matching timeline item
 - [ ] Constraint selection highlights the affected field region
 - [ ] Clear selection stays stable across all three regions

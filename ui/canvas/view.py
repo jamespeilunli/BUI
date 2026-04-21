@@ -2045,6 +2045,10 @@ class CanvasView(QGraphicsView):
         self._constraint_highlight_indices = highlight_indices
         self._apply_constraint_highlight()
 
+    def clear_constraint_segment_highlight(self):
+        """Clear constraint-segment highlight without affecting selection."""
+        self._clear_constraint_highlight()
+
     def _apply_constraint_highlight(self):
         """Apply visual highlight to elements in _constraint_highlight_indices."""
         highlight_color = QColor("#2d6a9f")
