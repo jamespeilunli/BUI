@@ -47,6 +47,7 @@ class ChassisSpeeds:
 @dataclass
 class SimResult:
     poses_by_time: Dict[float, Tuple[float, float, float]]
+    progress_by_time: Dict[float, float]
     times_sorted: List[float]
     total_time_s: float
     trail_points: List[Tuple[float, float]]  # List of (x, y) positions for the trail
@@ -520,6 +521,7 @@ def simulate_path(
     segments, anchors, anchor_path_indices = _build_segments(path)
 
     poses_by_time: Dict[float, Tuple[float, float, float]] = {}
+    progress_by_time: Dict[float, float] = {}
     times_sorted: List[float] = []
     trail_points: List[Tuple[float, float]] = []
 
@@ -527,10 +529,12 @@ def simulate_path(
         if anchors:
             x0, y0 = anchors[0]
             poses_by_time[0.0] = (x0, y0, 0.0)
+            progress_by_time[0.0] = 0.0
             times_sorted = [0.0]
             trail_points = [(x0, y0)]
         return SimResult(
             poses_by_time=poses_by_time,
+            progress_by_time=progress_by_time,
             times_sorted=times_sorted,
             total_time_s=0.0,
             trail_points=trail_points,
@@ -597,6 +601,7 @@ def simulate_path(
     theta = initial_heading
 
     speeds = ChassisSpeeds(vx_mps=0.0, vy_mps=0.0, omega_radps=0.0)
+    last_progress_s = 0.0
 
     t_s = 0.0
     seg_idx = 0
@@ -788,9 +793,18 @@ def simulate_path(
             y += step_dy
         theta = wrap_angle_radians(theta + limited.omega_radps * dt_s)
 
+        current_seg = segments[min(seg_idx, len(segments) - 1)]
+        current_proj = dot(x - current_seg.ax, y - current_seg.ay, current_seg.ux, current_seg.uy)
+        current_proj = max(0.0, min(current_proj, current_seg.length_m))
+        remaining_after = remaining_distance_from(seg_idx, x, y, current_proj)
+        global_s_sample = total_path_len - remaining_after
+        global_s_sample = max(last_progress_s, min(global_s_sample, total_path_len))
+
         t_key = round(t_s, 3)
         poses_by_time[t_key] = (float(x), float(y), float(theta))
+        progress_by_time[t_key] = float(global_s_sample)
         times_sorted.append(t_key)
+        last_progress_s = float(global_s_sample)
 
         # Add current position to trail
         trail_points.append((float(x), float(y)))
@@ -822,6 +836,8 @@ def simulate_path(
 
             if snapped_pos or snapped_rot:
                 poses_by_time[t_key] = (float(x), float(y), float(theta))
+                progress_by_time[t_key] = float(total_path_len if snapped_pos else global_s_sample)
+                last_progress_s = float(progress_by_time[t_key])
                 trail_points[-1] = (float(x), float(y))
                 # Zero corresponding velocities after snapping to avoid dithering away from the target
                 if snapped_pos:
@@ -841,6 +857,7 @@ def simulate_path(
     last_time = round(t_s, 3)
     if last_time not in poses_by_time and times_sorted:
         poses_by_time[last_time] = poses_by_time[times_sorted[-1]]
+        progress_by_time[last_time] = progress_by_time[times_sorted[-1]]
         times_sorted.append(last_time)
 
     seen = set()
@@ -854,6 +871,7 @@ def simulate_path(
     total_time_s = uniq_times[-1] if uniq_times else 0.0
     return SimResult(
         poses_by_time=poses_by_time,
+        progress_by_time=progress_by_time,
         times_sorted=uniq_times,
         total_time_s=total_time_s,
         trail_points=trail_points,

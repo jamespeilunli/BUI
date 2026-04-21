@@ -1653,21 +1653,31 @@ class CanvasView(QGraphicsView):
             self._sim_times_sorted = result.times_sorted
             self._sim_total_time_s = float(result.total_time_s)
             self._sim_current_time_s = 0.0
-            segments, _anchor_map, total_len = self._build_anchor_progress_geometry()
             self._sim_global_s_by_time = {}
-            if segments and self._sim_times_sorted:
+            raw_progress = dict(getattr(result, "progress_by_time", {}) or {})
+            if raw_progress and self._sim_times_sorted:
                 last_s = 0.0
                 for tk in self._sim_times_sorted:
-                    pose = self._sim_poses_by_time.get(tk)
-                    if pose is None:
+                    if tk not in raw_progress:
                         continue
-                    x_m, y_m, _ = pose
-                    s_val = self._project_point_to_global_s(
-                        float(x_m), float(y_m), segments, fallback_s=last_s
-                    )
-                    s_val = min(float(total_len), max(last_s, s_val))
+                    s_val = max(last_s, float(raw_progress[tk]))
                     self._sim_global_s_by_time[tk] = s_val
                     last_s = s_val
+            elif self._sim_times_sorted:
+                segments, _anchor_map, total_len = self._build_anchor_progress_geometry()
+                if segments:
+                    last_s = 0.0
+                    for tk in self._sim_times_sorted:
+                        pose = self._sim_poses_by_time.get(tk)
+                        if pose is None:
+                            continue
+                        x_m, y_m, _ = pose
+                        s_val = self._project_point_to_global_s(
+                            float(x_m), float(y_m), segments, fallback_s=last_s
+                        )
+                        s_val = min(float(total_len), max(last_s, s_val))
+                        self._sim_global_s_by_time[tk] = s_val
+                        last_s = s_val
             self._rebuild_protrusion_trigger_schedule()
             if self._sim_robot_item and self._sim_times_sorted:
                 t0 = self._sim_times_sorted[0]

@@ -1414,12 +1414,9 @@ def _build_sim_time_index(
     sim = simulate_path(path, config, dt_s=0.02)
     times = list(getattr(sim, "times_sorted", []) or [])
     poses = dict(getattr(sim, "poses_by_time", {}) or {})
+    progress = dict(getattr(sim, "progress_by_time", {}) or {})
     if len(times) < 2 or not poses:
         raise ValueError("not enough simulation samples")
-
-    segments, total_len = _build_anchor_progress_geometry(list(getattr(path, "path_elements", []) or []))
-    if not segments or total_len <= 1e-9:
-        raise ValueError("insufficient anchor geometry")
 
     sample_s: list[float] = []
     sample_t: list[float] = []
@@ -1427,13 +1424,25 @@ def _build_sim_time_index(
     sample_y: list[float] = []
     last_s = 0.0
 
+    segments: list[tuple[float, float, float, float, float, float, float]] = []
+    total_len = 0.0
+    if not progress:
+        segments, total_len = _build_anchor_progress_geometry(
+            list(getattr(path, "path_elements", []) or [])
+        )
+        if not segments or total_len <= 1e-9:
+            raise ValueError("insufficient anchor geometry")
+
     for t in times:
         pose = poses.get(t)
         if pose is None:
             continue
         x, y, _ = pose
-        s_val = _project_point_to_global_s(float(x), float(y), segments, fallback_s=last_s)
-        s_val = min(float(total_len), max(last_s, s_val))
+        if progress and t in progress:
+            s_val = max(last_s, min(float(total_s), float(progress[t])))
+        else:
+            s_val = _project_point_to_global_s(float(x), float(y), segments, fallback_s=last_s)
+            s_val = min(float(total_len), max(last_s, s_val))
         sample_s.append(s_val)
         sample_t.append(float(t))
         sample_x.append(float(x))
@@ -1520,15 +1529,28 @@ def _closest_time_for_point(
     y_m: float,
     *,
     expected_s: float,
+    max_s_delta: float | None = 1.5,
 ) -> float | None:
     if not sim_index.sample_t:
         return None
 
+    if max_s_delta is None:
+        candidate_indices = range(len(sim_index.sample_t))
+    else:
+        min_s = max(0.0, float(expected_s) - float(max_s_delta))
+        max_s = float(expected_s) + float(max_s_delta)
+        start_idx = bisect.bisect_left(sim_index.sample_s, min_s)
+        end_idx = bisect.bisect_right(sim_index.sample_s, max_s)
+        if start_idx >= end_idx:
+            return None
+        candidate_indices = range(start_idx, end_idx)
+
     best_idx: int | None = None
     best_score: float | None = None
-    for idx, (sx, sy, ss) in enumerate(
-        zip(sim_index.sample_x, sim_index.sample_y, sim_index.sample_s)
-    ):
+    for idx in candidate_indices:
+        sx = sim_index.sample_x[idx]
+        sy = sim_index.sample_y[idx]
+        ss = sim_index.sample_s[idx]
         dist2 = (float(sx) - x_m) ** 2 + (float(sy) - y_m) ** 2
         s_bias = 0.25 * abs(float(ss) - float(expected_s))
         score = dist2 + s_bias * s_bias
