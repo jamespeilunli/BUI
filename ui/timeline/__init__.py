@@ -1,3 +1,3 @@
-from .placeholder import TimelinePlaceholder
+from .placeholder import TimelineDock, TimelinePlaceholder
 
-__all__ = ["TimelinePlaceholder"]
+__all__ = ["TimelineDock", "TimelinePlaceholder"]

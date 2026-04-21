@@ -59,11 +59,11 @@ Objective:
 
 Tasks:
 
-- [ ] Render a simple structure row for path items
-- [ ] Render one trigger group from real project data
-- [ ] Render four constraint rows from real project data
-- [ ] Add a ruler, horizontal scrolling, and fit-all zoom
-- [ ] Show sensible empty states for no path, no triggers, and no constraints
+- [x] Render a simple structure row for path items
+- [x] Render one trigger group from real project data
+- [x] Render four constraint rows from real project data
+- [x] Add a ruler, horizontal scrolling, and fit-all zoom
+- [x] Show sensible empty states for no path, no triggers, and no constraints
 
 Exit criteria:
 

@@ -95,7 +95,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
         self.editor_splitter.addWidget(self.canvas)
 
         # Timeline dock shell (bottom-left)
-        self.timeline = TimelinePlaceholder(self.path)
+        self.timeline = TimelinePlaceholder(self.path, None)
         self.editor_splitter.addWidget(self.timeline)
 
         # Placeholder for sidebar (right)
@@ -113,7 +113,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
 
         # Initialize canvas with path
         self.canvas.set_path(self.path)
-        self.timeline.set_path(self.path)
+        self.timeline.set_path(self.path, self._timeline_config())
         # Build initial simulation
         self.canvas.request_simulation_rebuild()
 
@@ -165,10 +165,14 @@ class MainWindow(WindowEventMixin, QMainWindow):
         self.sidebar.modelChanged.connect(self.canvas.refresh_from_model)
         self.sidebar.modelChanged.connect(self.canvas.update_handoff_radius_visualizers)
         self.sidebar.modelChanged.connect(self.canvas.request_simulation_rebuild)
-        self.sidebar.modelChanged.connect(lambda: self.timeline.set_path(self.path))
+        self.sidebar.modelChanged.connect(
+            lambda: self.timeline.set_path(self.path, self._timeline_config())
+        )
         self.sidebar.modelStructureChanged.connect(lambda: self.canvas.set_path(self.path))
         self.sidebar.modelStructureChanged.connect(self.canvas.request_simulation_rebuild)
-        self.sidebar.modelStructureChanged.connect(lambda: self.timeline.set_path(self.path))
+        self.sidebar.modelStructureChanged.connect(
+            lambda: self.timeline.set_path(self.path, self._timeline_config())
+        )
         # Global UI clicks: clear ranged overlay unless the click target is a range-related control
         try:
             app = QApplication.instance()
@@ -247,6 +251,14 @@ class MainWindow(WindowEventMixin, QMainWindow):
             self.editor_splitter.setStretchFactor(1, 0)
         except Exception:
             pass
+
+    def _timeline_config(self) -> dict:
+        try:
+            if hasattr(self.project_manager, "config_as_dict"):
+                return dict(self.project_manager.config_as_dict() or {})
+        except Exception:
+            pass
+        return {}
 
     def _apply_default_splitter_sizes(self):
         """Apply Phase 1 default proportions after the window has geometry."""
@@ -535,7 +547,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
         """Refresh all UI components after an undo/redo operation."""
         # Refresh canvas from model
         self.canvas.set_path(self.path)
-        self.timeline.set_path(self.path)
+        self.timeline.set_path(self.path, self._timeline_config())
         self.canvas.refresh_from_model()
         self.canvas.update_handoff_radius_visualizers()
         self.canvas.request_simulation_rebuild()
@@ -1124,7 +1136,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
         self.path = path
         self.sidebar.set_path(self.path)
         self.canvas.set_path(self.path)
-        self.timeline.set_path(self.path)
+        self.timeline.set_path(self.path, self._timeline_config())
         # Update the current path display
         self._update_current_path_display()
         # Only autosave if this is a new path being created, not when loading existing paths
@@ -1377,6 +1389,12 @@ class MainWindow(WindowEventMixin, QMainWindow):
             # Non-structural changes stay on the live-updated path; keep local UI sync only when needed.
             if self.sidebar.get_selected_index() != new_index:
                 self.sidebar.select_index(new_index, propagate_to_canvas=False)
+
+        # Update timeline once per drag operation (on release), not during live drag.
+        try:
+            self.timeline.set_path(self.path, self._timeline_config())
+        except Exception:
+            pass
 
         # Record the drag operation for undo/redo only if model state actually changed.
         did_change = bool(old_state is not None and self._has_path_changed_since(old_state))
