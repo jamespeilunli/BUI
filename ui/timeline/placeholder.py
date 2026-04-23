@@ -47,7 +47,7 @@ MIN_SPAN_ROW_HEIGHT = 24
 MIN_LANE_HEIGHT = 6
 MIN_LANE_GAP = 2
 MIN_ZOOM_PX_PER_M = 24
-MAX_ZOOM_PX_PER_M = 240
+MAX_ZOOM_PX_PER_M = 1200
 DEFAULT_ZOOM_PX_PER_M = 72
 ZOOM_SLIDER_MIN = 0
 ZOOM_SLIDER_MAX = 100
@@ -947,7 +947,7 @@ class TimelineDock(QFrame):
 
         self._track_scroll = QScrollArea()
         self._track_scroll.setWidgetResizable(False)
-        self._track_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._track_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._track_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._track_scroll.viewport().installEventFilter(self)
 
@@ -973,6 +973,20 @@ class TimelineDock(QFrame):
         self._on_zoom_changed(self._zoom_slider.value())
 
     def eventFilter(self, watched, event):  # noqa: N802
+        if event.type() == QEvent.Wheel and watched in {
+            self._track_scroll.viewport(),
+            self._rail_scroll.viewport(),
+        }:
+            delta = event.angleDelta()
+            delta_y = int(delta.y()) if delta else 0
+            if delta_y == 0:
+                pixel_delta = event.pixelDelta()
+                if pixel_delta:
+                    delta_y = int(pixel_delta.y())
+            if delta_y != 0:
+                self._zoom_from_wheel(delta_y, event.position().x(), watched)
+                event.accept()
+                return True
         if event.type() == QEvent.Resize and watched in {
             self._track_scroll.viewport(),
             self._rail_scroll.viewport(),
@@ -1004,6 +1018,33 @@ class TimelineDock(QFrame):
     def _adjust_zoom(self, delta: int) -> None:
         self._zoom_slider.setValue(self._zoom_slider.value() + int(delta))
 
+    def _zoom_from_wheel(self, delta_y: int, viewport_x: float, watched: QWidget) -> None:
+        if delta_y == 0:
+            return
+        current_zoom = int(self._track_canvas._zoom_px_per_m)
+        zoom_steps = float(delta_y) / 120.0
+        zoom_ratio = 1.12 ** zoom_steps
+        target_zoom = int(round(current_zoom * zoom_ratio))
+        if target_zoom == current_zoom:
+            target_zoom = current_zoom + (1 if delta_y > 0 else -1)
+        anchor_viewport_x = float(viewport_x)
+        anchor_s_m: float | None = None
+        if watched is self._track_scroll.viewport():
+            hbar = self._track_scroll.horizontalScrollBar()
+            content_x = float(hbar.value()) + anchor_viewport_x
+            anchor_s_m = max(
+                0.0,
+                min(
+                    (content_x - TRACK_PADDING_X) / max(1.0, float(current_zoom)),
+                    float(self._projection.display_s_m),
+                ),
+            )
+        self._set_zoom_px_per_m(
+            target_zoom,
+            anchor_viewport_x=anchor_viewport_x,
+            anchor_s_m=anchor_s_m,
+        )
+
     def set_playback_state(
         self,
         current_time_s: float,
@@ -1029,25 +1070,45 @@ class TimelineDock(QFrame):
         zoom_px_per_m = self._zoom_value_from_slider(value)
         self._apply_zoom_px_per_m(zoom_px_per_m)
 
-    def _apply_zoom_px_per_m(self, zoom_px_per_m: int) -> None:
+    def _apply_zoom_px_per_m(
+        self,
+        zoom_px_per_m: int,
+        *,
+        anchor_viewport_x: float | None = None,
+        anchor_s_m: float | None = None,
+    ) -> None:
         zoom_px_per_m = max(
             int(self._minimum_zoom_px_per_m),
             min(MAX_ZOOM_PX_PER_M, int(round(zoom_px_per_m))),
         )
         hbar = self._track_scroll.horizontalScrollBar()
-        playhead_x_before = TRACK_PADDING_X + self._current_time_s * float(
-            self._track_canvas._zoom_px_per_m
-        )
-        playhead_offset_in_view = playhead_x_before - float(hbar.value())
+        if anchor_viewport_x is not None and anchor_s_m is not None:
+            preserved_viewport_x = float(anchor_viewport_x)
+            preserved_content_s_m = max(
+                0.0,
+                min(float(anchor_s_m), float(self._projection.display_s_m)),
+            )
+        else:
+            playhead_x_before = TRACK_PADDING_X + self._current_time_s * float(
+                self._track_canvas._zoom_px_per_m
+            )
+            preserved_viewport_x = playhead_x_before - float(hbar.value())
+            preserved_content_s_m = float(self._current_time_s)
 
         self._zoom_label.setText(f"{int(zoom_px_per_m)} px/s")
         self._track_canvas.set_zoom_px_per_m(zoom_px_per_m)
         self._sync_canvas_size()
 
-        playhead_x_after = TRACK_PADDING_X + self._current_time_s * float(zoom_px_per_m)
-        hbar.setValue(int(round(playhead_x_after - playhead_offset_in_view)))
+        anchor_x_after = TRACK_PADDING_X + preserved_content_s_m * float(zoom_px_per_m)
+        hbar.setValue(int(round(anchor_x_after - preserved_viewport_x)))
 
-    def _set_zoom_px_per_m(self, zoom_px_per_m: int) -> None:
+    def _set_zoom_px_per_m(
+        self,
+        zoom_px_per_m: int,
+        *,
+        anchor_viewport_x: float | None = None,
+        anchor_s_m: float | None = None,
+    ) -> None:
         clamped_zoom = max(
             int(self._minimum_zoom_px_per_m),
             min(MAX_ZOOM_PX_PER_M, int(round(zoom_px_per_m))),
@@ -1056,7 +1117,11 @@ class TimelineDock(QFrame):
         self._zoom_slider.blockSignals(True)
         self._zoom_slider.setValue(slider_value)
         self._zoom_slider.blockSignals(False)
-        self._apply_zoom_px_per_m(clamped_zoom)
+        self._apply_zoom_px_per_m(
+            clamped_zoom,
+            anchor_viewport_x=anchor_viewport_x,
+            anchor_s_m=anchor_s_m,
+        )
 
     def _fit_zoom_px_per_m(self) -> int:
         display_s_m = max(self._projection.display_s_m, 0.0)

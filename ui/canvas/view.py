@@ -617,16 +617,31 @@ class CanvasView(QGraphicsView):
         except Exception:
             pass
 
+    def _scene_viewport_center(self) -> QPointF:
+        try:
+            viewport = self.viewport()
+            if viewport is not None:
+                viewport_rect = viewport.rect()
+                if viewport_rect.width() > 0 and viewport_rect.height() > 0:
+                    return self.mapToScene(viewport_rect.center())
+        except Exception:
+            pass
+        try:
+            return self.graphics_scene.sceneRect().center()
+        except Exception:
+            return QPointF()
+
     # ------------- Resize / Show -------------
     def resizeEvent(self, event):
+        preserve_center = self._scene_viewport_center()
         super().resizeEvent(event)
-        QTimer.singleShot(0, self._fit_to_scene)
+        QTimer.singleShot(0, lambda center=preserve_center: self._fit_to_scene(center))
 
     def showEvent(self, event):
         super().showEvent(event)
         QTimer.singleShot(0, self._fit_to_scene)
 
-    def _fit_to_scene(self):
+    def _fit_to_scene(self, preserve_center: Optional[QPointF] = None):
         if self._is_fitting:
             return
         self._is_fitting = True
@@ -637,6 +652,8 @@ class CanvasView(QGraphicsView):
                     self.fitInView(rect, Qt.KeepAspectRatio)
                     if abs(self._zoom_factor - 1.0) > 1e-6:
                         self.scale(self._zoom_factor, self._zoom_factor)
+                    if preserve_center is not None:
+                        self.centerOn(preserve_center)
                 except Exception:
                     pass
         finally:
