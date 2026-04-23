@@ -1,199 +1,113 @@
 # mypy: ignore-errors
-"""Main sidebar widget for path element management."""
+"""Selection-driven sidebar inspector for path elements and constraints."""
 
-import math
 from typing import Optional
+
+from PySide6.QtCore import QEvent, QTimer, Signal
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QFormLayout,
-    QLabel,
     QComboBox,
+    QFormLayout,
     QGroupBox,
-    QSpacerItem,
-    QListWidgetItem,
-    QPushButton,
-    QScrollArea,
+    QHBoxLayout,
+    QLabel,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Signal, QTimer, QEvent, QSize
-from PySide6.QtGui import QIcon
 
-from ui.qt_compat import Qt, QSizePolicy
-from models.path_model import Path, TranslationTarget, RotationTarget, Waypoint, EventTrigger
 from models.ordinal_remap import remap_ranged_constraints
+from models.path_model import (
+    EventTrigger,
+    Path,
+    RangedConstraint,
+    RotationTarget,
+    TranslationTarget,
+    Waypoint,
+)
+from ui.qt_compat import Qt, QSizePolicy
 
-
-from .widgets import CustomList, PersistentCustomList, PopupCombobox, PersistentScrollArea
-from .components import ElementManager, ConstraintManager, PropertyEditor
-from .utils import ElementType, ELEMENT_TYPE_LABELS, ELEMENT_LABEL_TO_TYPE, SPINNER_METADATA, PATH_CONSTRAINT_KEYS, NON_RANGED_CONSTRAINT_KEYS
+from .components import ConstraintManager, ElementManager, PropertyEditor
+from .utils import ELEMENT_LABEL_TO_TYPE, ELEMENT_TYPE_LABELS, ElementType, SPINNER_METADATA
+from .widgets import NoWheelDoubleSpinBox
 
 
 class Sidebar(QWidget):
-    """Main sidebar widget for editing path elements and their properties."""
+    """Right-hand inspector for the current selection."""
 
-    # Emitted when a list item is selected in the sidebar
-    elementSelected = Signal(int)  # index
-    # Emitted when attributes are changed through the UI (positions, rotation, etc.)
+    elementSelected = Signal(int)
     modelChanged = Signal()
-    # Emitted when structure changes (reorder, type switch)
     modelStructureChanged = Signal()
-    # Emitted when user requests deletion via keyboard
     deleteSelectedRequested = Signal()
-    # Emitted right before the model is mutated; provides a human-readable description
     aboutToChange = Signal(str)
-    # Emitted after the model is mutated; provides a human-readable description
     userActionOccurred = Signal(str)
 
-    # Forward constraint preview signals
-    constraintRangePreviewRequested = Signal(str, int, int)  # key, start_ordinal, end_ordinal
+    constraintRangePreviewRequested = Signal(str, int, int)
     constraintRangePreviewCleared = Signal()
 
-    # Forward popout lifecycle signals
     popoutOpened = Signal()
     popoutClosed = Signal()
-    popoutSegmentSelected = Signal(str, int, int)  # key, start_ordinal, end_ordinal
-    # Forward undo/redo requests from popout
+    popoutSegmentSelected = Signal(str, int, int)
     undoRequested = Signal()
     redoRequested = Signal()
 
     def __init__(self, path=Path()):
         super().__init__()
         self.path = path
-        self.project_manager = None  # Set externally to access config defaults
+        self.project_manager = None
 
-        # Re-entrancy/visibility guards
         self._suspended: bool = False
         self._ready: bool = False
-        # Track last selected index for restoration when paths are reloaded
-        self._last_selected_index: int = 0
-        # Suppress redundant elementSelected emits to avoid cross-view selection churn.
-        self._last_emitted_selected_index: Optional[int] = None
-        # One-shot suppression flag for canvas-originated programmatic list selection.
-        self._suppress_element_selected_emit_once: bool = False
-        # Stable identity of the currently selected model element.
+        self._last_selected_index: Optional[int] = None
+        self._selected_index: Optional[int] = None
         self._selected_element_identity: Optional[int] = None
+        self._selected_constraint_ref: Optional[tuple[str, int, int]] = None
+        self._last_emitted_selected_index: Optional[int] = None
+        self._suppress_element_selected_emit_once: bool = False
 
-        # Initialize components
+        # Compatibility placeholders for callers that still probe for these.
+        self.points_list = None
+        self.constraints_scroll = None
+
         self.element_manager = ElementManager(self)
         self.constraint_manager = ConstraintManager(self)
         self.property_editor = PropertyEditor(self)
 
-        # Set up UI
         self._setup_ui()
-
-        # Connect component signals
         self._connect_component_signals()
-
-        # Project manager will be set externally, so defer component setup
-
-        # Initialize data
         self.set_path(path)
-
-        # Mark as ready
         self.mark_ready()
 
-    def _setup_ui(self):
-        """Set up the UI layout and widgets."""
+    def _setup_ui(self) -> None:
         main_layout = QVBoxLayout(self)
-        # Remove outer margins so the constraints area reaches the window bottom inline with canvas
-        try:
-            main_layout.setContentsMargins(0, 0, 0, 0)
-        except Exception:
-            pass
-        # Keep the sidebar compact by default, but allow the main window splitter
-        # to widen or narrow it during the redesign.
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(10)
+
         self.setMinimumWidth(280)
         self.resize(300, self.height())
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
-        # Top section: Path Elements title bar with add button
-        self._create_path_elements_bar(main_layout)
-
-        # Elements list
-        self.points_list = PersistentCustomList()
-        # Set size policy to allow adaptive height
-        self.points_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        # Let the list adapt to content while keeping reasonable bounds
-        self.points_list.setMinimumHeight(80)
-        self.points_list.setMaximumHeight(300)
-        # Enable scrolling for long lists
-        self.points_list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        main_layout.addWidget(self.points_list)
-
-        # Connect list signals
-        self.points_list.itemSelectionChanged.connect(self.on_item_selected)
-        self.points_list.reordered.connect(self.on_points_list_reordered)
-        self.points_list.deleteRequested.connect(lambda: self._delete_via_shortcut())
-
-        main_layout.addSpacing(10)  # Add space between list and groupbox
-
-        # Element Properties section
         self._create_properties_section(main_layout)
 
-        # Path Constraints section
-        self._create_constraints_section(main_layout)
+        self.empty_state = QLabel("Select an element on the field or a constraint on the timeline.")
+        self.empty_state.setAlignment(Qt.AlignCenter)
+        self.empty_state.setWordWrap(True)
+        self.empty_state.setStyleSheet(
+            """
+            color: #8f98a2;
+            padding: 16px;
+            border: 1px dashed #3b3f45;
+            border-radius: 8px;
+            background: #171717;
+            """
+        )
+        self.empty_state.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        main_layout.addWidget(self.empty_state, 1)
 
-        # No stretch at bottom so last expanding sections (properties / constraints) fill space
+        self.spinners = self.property_editor.create_property_controls(self.core_layout, None)
 
-        # Install event filter for constraint preview handling
         self.installEventFilter(self)
+        self._show_empty_state()
 
-    def _create_path_elements_bar(self, parent_layout):
-        """Create the Path Elements title bar with add button."""
-        top_section = QWidget()
-        top_layout = QHBoxLayout(top_section)
-        top_layout.setContentsMargins(0, 0, 0, 0)
-        top_layout.setSpacing(20)
-
-        # Path Elements title bar
-        self.path_elements_bar = QWidget()
-        self.path_elements_bar.setObjectName("pathElementsBar")
-        self.path_elements_bar.setStyleSheet(
-            """
-            QWidget#pathElementsBar {
-                background-color: #2f2f2f;
-                border: 1px solid #4a4a4a;
-                border-radius: 6px;
-            }
-        """
-        )
-
-        path_elements_bar_layout = QHBoxLayout(self.path_elements_bar)
-        path_elements_bar_layout.setContentsMargins(8, 0, 8, 0)
-        path_elements_bar_layout.setSpacing(8)
-
-        path_elements_label = QLabel("Path Elements")
-        path_elements_label.setStyleSheet(
-            """
-            font-size: 14px;
-            font-weight: bold;
-            color: #eeeeee;
-            background: transparent;
-            border: none;
-            padding: 6px 0;
-        """
-        )
-        path_elements_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        path_elements_bar_layout.addWidget(path_elements_label)
-        path_elements_bar_layout.addStretch()
-
-        # Add element button
-        self.add_element_pop = PopupCombobox()
-        self.add_element_pop.setText("Add element")
-        self.add_element_pop.setToolTip("Add a path element at the current selection")
-        self.add_element_pop.button.setIconSize(QSize(16, 16))
-        self.add_element_pop.button.setMinimumHeight(22)
-        self.add_element_pop.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.add_element_pop.item_selected.connect(self.on_add_element_selected)
-
-        path_elements_bar_layout.addWidget(self.add_element_pop)
-        top_layout.addWidget(self.path_elements_bar, 1)
-        parent_layout.addWidget(top_section)
-
-    def _create_properties_section(self, parent_layout):
-        """Create the Element Properties section."""
-        # Title bar
+    def _create_properties_section(self, parent_layout) -> None:
         self.title_bar = QWidget()
         self.title_bar.setObjectName("titleBar")
         self.title_bar.setStyleSheet(
@@ -203,127 +117,14 @@ class Sidebar(QWidget):
                 border: 1px solid #4a4a4a;
                 border-radius: 6px;
             }
-        """
-        )
-        title_bar_layout = QHBoxLayout(self.title_bar)
-        title_bar_layout.setContentsMargins(10, 0, 10, 0)
-        title_bar_layout.setSpacing(0)
-
-        title_label = QLabel("Element Properties")
-        title_label.setStyleSheet(
             """
-            font-size: 14px; 
-            font-weight: bold;
-            color: #eeeeee;
-            background: transparent;
-            border: none;
-            padding: 6px 0;
-        """
         )
-        title_bar_layout.addWidget(title_label)
-        title_bar_layout.addStretch()
+        title_layout = QHBoxLayout(self.title_bar)
+        title_layout.setContentsMargins(10, 0, 10, 0)
+        title_layout.setSpacing(0)
 
-        parent_layout.addWidget(self.title_bar)
-
-        # Form container
-        self.form_container = QGroupBox()
-        # Do not force vertical expansion; let constraints grow instead
-        self.form_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        self.form_container.setStyleSheet(
-            """
-            QGroupBox { background-color: #242424; border: 1px solid #3f3f3f; border-radius: 6px; }
-            QLabel { color: #f0f0f0; }
-            /* Unified rounded boxes for each individual core property row to match constraints */
-            QWidget[constraintRow='true'] { background: #2a2a2a; border: 1px solid #3b3b3b; border-radius: 6px; margin: 4px 0; }
-        """
-        )
-
-        # Main layout for the group box
-        group_box_spinner_layout = QVBoxLayout(self.form_container)
-        # Match constraints: reduce outer left/right padding; tighter vertical spacing
-        group_box_spinner_layout.setContentsMargins(0, 6, 0, 6)
-        group_box_spinner_layout.setSpacing(4)
-
-        # Type selector and properties form
-        self.core_page = QWidget()
-        self.core_page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.core_layout = QFormLayout(self.core_page)
-        self.core_layout.setLabelAlignment(Qt.AlignRight)
-        # Reduce row spacing to match constraints
-        self.core_layout.setVerticalSpacing(4)
-        # Remove extra content margins so row widgets align with container padding
-        try:
-            self.core_layout.setContentsMargins(0, 0, 0, 0)
-        except Exception:
-            pass
-        self.core_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-
-        # Type selector
-        self.optional_container = QWidget()
-        self.optional_box_layout = QHBoxLayout(self.optional_container)
-        self.optional_box_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.type_combo = QComboBox()
-        self.type_combo.addItems([ELEMENT_TYPE_LABELS[e] for e in ElementType])
-        self.type_combo.currentTextChanged.connect(self.on_type_change)
-        self.type_label = QLabel("Type:")
-
-        self.optional_box_layout.addWidget(self.type_combo)
-
-        # Put the type selector above the properties (styled like constraint rows)
-        header_row = QWidget()
-        header_row.setProperty("constraintRow", "true")
-        header_row_layout = QHBoxLayout(header_row)
-        # Reduce top/bottom padding inside the combobox bordered box and tighten right padding
-        header_row_layout.setContentsMargins(8, 7, 0, 4)
-        header_row_layout.setSpacing(6)
-        try:
-            # Keep natural height; only constrain width/alignment
-            header_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        except Exception:
-            pass
-        header_row_layout.addWidget(self.type_label)
-        header_row_layout.addStretch()
-        try:
-            self.optional_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        except Exception:
-            pass
-        header_row_layout.addWidget(self.optional_container)
-        # Wrap header to enforce same left/right padding as other rows
-        header_wrap = QWidget()
-        header_wrap_layout = QHBoxLayout(header_wrap)
-        header_wrap_layout.setContentsMargins(8, 0, 8, 0)
-        header_wrap_layout.setSpacing(0)
-        header_wrap_layout.addWidget(header_row)
-        group_box_spinner_layout.addWidget(header_wrap)
-        self.core_page.setContentsMargins(8, 0, 8, 0)
-        group_box_spinner_layout.addWidget(self.core_page)
-
-        # Do not add internal stretch here so this section keeps a compact height
-        self.form_container.setContentsMargins(6, 6, 6, 6)
-
-        parent_layout.addWidget(self.form_container)
-
-    def _create_constraints_section(self, parent_layout):
-        """Create the Path Constraints section."""
-        # Constraints title bar
-        self.constraints_title_bar = QWidget()
-        self.constraints_title_bar.setObjectName("constraintsTitleBar")
-        self.constraints_title_bar.setStyleSheet(
-            """
-            QWidget#constraintsTitleBar {
-                background-color: #2f2f2f;
-                border: 1px solid #4a4a4a;
-                border-radius: 6px;
-            }
-        """
-        )
-        constraints_title_layout = QHBoxLayout(self.constraints_title_bar)
-        constraints_title_layout.setContentsMargins(8, 0, 8, 0)
-        constraints_title_layout.setSpacing(8)
-
-        constraints_label = QLabel("Path Constraints")
-        constraints_label.setStyleSheet(
+        self.title_label = QLabel("Inspector")
+        self.title_label.setStyleSheet(
             """
             font-size: 14px;
             font-weight: bold;
@@ -331,99 +132,80 @@ class Sidebar(QWidget):
             background: transparent;
             border: none;
             padding: 6px 0;
-        """
-        )
-        constraints_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        constraints_title_layout.addWidget(constraints_label)
-        constraints_title_layout.addStretch()
-
-        # Add constraint button
-        self.optional_pop = PopupCombobox()
-        self.optional_pop.setText("Add constraint")
-        self.optional_pop.setToolTip("Add an optional constraint")
-        self.optional_pop.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.optional_pop.button.setIconSize(QSize(16, 16))
-        self.optional_pop.button.setMinimumHeight(22)
-        self.optional_pop.item_selected.connect(self.on_constraint_added)
-
-        constraints_title_layout.addWidget(self.optional_pop)
-        parent_layout.addWidget(self.constraints_title_bar)
-
-        # Constraints form container (wrapped in scroll area)
-        self.constraints_scroll = PersistentScrollArea()
-        self.constraints_scroll.setWidgetResizable(True)
-        self.constraints_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        try:
-            # Keep content anchored to top-left and disallow horizontal panning
-            self.constraints_scroll.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-        except Exception:
-            pass
-        self.constraints_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.constraints_scroll.setFrameShape(QScrollArea.NoFrame)
-
-        self.constraints_form_container = QGroupBox()
-        self.constraints_form_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        self.constraints_form_container.setStyleSheet(
             """
-            QGroupBox { background-color: #242424; border: 1px solid #3f3f3f; border-radius: 8px; margin-top: 0px; }
+        )
+        title_layout.addWidget(self.title_label)
+        title_layout.addStretch()
+        parent_layout.addWidget(self.title_bar)
+
+        self.form_container = QGroupBox()
+        self.form_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.form_container.setStyleSheet(
+            """
+            QGroupBox {
+                background-color: #242424;
+                border: 1px solid #3f3f3f;
+                border-radius: 6px;
+            }
             QLabel { color: #f0f0f0; }
-            /* Encompassing container for each ranged constraint type */
-            QWidget[constraintGroupContainer='true'] { background: #242a2e; border: 1px solid #3b3b3b; border-radius: 8px; margin: 4px 0; }
-            QWidget[constraintGroupContainer='true'][constraintGroup='rotation'] { background: #2a242a; }
-            /* Unified rounded boxes for each individual constraint row */
-            QWidget[constraintRow='true'] { background: #2a2a2a; border: 1px solid #3b3b3b; border-radius: 6px; margin: 4px 0; }
-            QWidget[constraintRow='true'][constraintGroup='translation'] { background: #262f36; }
-            QWidget[constraintRow='true'][constraintGroup='rotation'] { background: #30262f; }
-            QLabel[constraintGroup] { background: transparent; }
-        """
+            QWidget[constraintRow='true'] {
+                background: #2a2a2a;
+                border: 1px solid #3b3b3b;
+                border-radius: 6px;
+                margin: 4px 0;
+            }
+            """
         )
 
-        inner_widget = QWidget()
-        inner_layout = QVBoxLayout(inner_widget)
-        inner_layout.setContentsMargins(0, 0, 0, 0)
-        inner_layout.setSpacing(0)
-        inner_layout.addWidget(self.constraints_form_container)
-        self.constraints_scroll.setWidget(inner_widget)
-        try:
-            # Ensure containers can shrink with the viewport to avoid horizontal clipping
-            inner_widget.setMinimumWidth(0)
-            self.constraints_form_container.setMinimumWidth(0)
-        except Exception:
-            pass
+        box = QVBoxLayout(self.form_container)
+        box.setContentsMargins(0, 6, 0, 6)
+        box.setSpacing(4)
 
-        self.constraints_layout = QFormLayout(self.constraints_form_container)
-        self.constraints_layout.setLabelAlignment(Qt.AlignRight)
-        self.constraints_layout.setVerticalSpacing(4)
-        self.constraints_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self.type_row = QWidget()
+        self.type_row.setProperty("constraintRow", "true")
+        type_row_layout = QHBoxLayout(self.type_row)
+        type_row_layout.setContentsMargins(8, 7, 8, 4)
+        type_row_layout.setSpacing(6)
+        self.type_row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-        # Let this section expand to consume available vertical space while still scrolling internally
-        self.constraints_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        parent_layout.addWidget(self.constraints_scroll)
-        try:
-            # Ensure the scroll area consumes remaining vertical space and sits flush at bottom
-            self.constraints_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        except Exception:
-            pass
+        self.type_label = QLabel("Type")
+        self.type_combo = QComboBox()
+        self.type_combo.currentTextChanged.connect(self.on_type_change)
+        self.type_combo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        type_row_layout.addWidget(self.type_label)
+        type_row_layout.addStretch()
+        type_row_layout.addWidget(self.type_combo)
+        box.addWidget(self.type_row)
 
-        # Balance vertical expansion dynamically: favor constraints section
-        form_idx = parent_layout.indexOf(self.form_container)
-        constr_idx = parent_layout.indexOf(self.constraints_scroll)
-        if form_idx != -1:
-            parent_layout.setStretch(form_idx, 0)
-        if constr_idx != -1:
-            parent_layout.setStretch(constr_idx, 1)
+        self.core_page = QWidget()
+        self.core_layout = QFormLayout(self.core_page)
+        self.core_layout.setLabelAlignment(Qt.AlignRight)
+        self.core_layout.setVerticalSpacing(4)
+        self.core_layout.setContentsMargins(8, 0, 8, 0)
+        self.core_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        box.addWidget(self.core_page)
 
-        # Create property controls (includes both core and constraint spinners)
-        self.spinners = self.property_editor.create_property_controls(
-            self.core_layout, self.constraints_layout
-        )
+        self.constraint_page = QWidget()
+        self.constraint_page.setContentsMargins(0, 0, 0, 0)
+        constraint_layout = QFormLayout(self.constraint_page)
+        constraint_layout.setLabelAlignment(Qt.AlignRight)
+        constraint_layout.setVerticalSpacing(4)
+        constraint_layout.setContentsMargins(8, 0, 8, 0)
+        constraint_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
-    def _connect_component_signals(self):
-        """Connect signals from components to main sidebar signals."""
-        # Element manager signals
-        self.element_manager.elementAdded.connect(
-            lambda idx, elem: self.modelStructureChanged.emit()
-        )
+        self.constraint_value_spin = NoWheelDoubleSpinBox()
+        self.constraint_value_spin.setMinimumWidth(96)
+        self.constraint_value_spin.setMaximumWidth(120)
+        self.constraint_value_spin.setDecimals(3)
+        self.constraint_value_spin.setKeyboardTracking(False)
+        self.constraint_value_spin.valueChanged.connect(self.on_constraint_value_changed)
+        constraint_layout.addRow("Value", self.constraint_value_spin)
+        box.addWidget(self.constraint_page)
+
+        parent_layout.addWidget(self.form_container, 1)
+
+    def _connect_component_signals(self) -> None:
+        self.element_manager.elementAdded.connect(lambda idx, elem: self.modelStructureChanged.emit())
         self.element_manager.elementRemoved.connect(
             lambda idx, elem: self.modelStructureChanged.emit()
         )
@@ -434,528 +216,242 @@ class Sidebar(QWidget):
             lambda order: self.modelStructureChanged.emit()
         )
 
-        # Constraint manager signals
-        self.constraint_manager.constraintAdded.connect(
-            lambda key, val: (self.modelChanged.emit(), self.refresh_current_selection())
-        )
-        self.constraint_manager.constraintRemoved.connect(
-            lambda key: (self.modelChanged.emit(), self.refresh_current_selection())
-        )
+        self.constraint_manager.constraintAdded.connect(lambda key, val: self.modelChanged.emit())
+        self.constraint_manager.constraintRemoved.connect(lambda key: self.modelChanged.emit())
         self.constraint_manager.constraintValueChanged.connect(
             lambda key, val: self.modelChanged.emit()
         )
         self.constraint_manager.constraintRangeChanged.connect(
             lambda key, start, end: self.modelChanged.emit()
         )
-        # Forward undo/redo coordination from constraint manager so main window can snapshot
-        try:
-            self.constraint_manager.aboutToChange.connect(self.aboutToChange)
-            self.constraint_manager.userActionOccurred.connect(self.userActionOccurred)
-        except Exception:
-            pass
 
-        # Forward preview signals
+        self.constraint_manager.aboutToChange.connect(self.aboutToChange)
+        self.constraint_manager.userActionOccurred.connect(self.userActionOccurred)
         self.constraint_manager.constraintRangePreviewRequested.connect(
             self.constraintRangePreviewRequested
         )
         self.constraint_manager.constraintRangePreviewCleared.connect(
             self.constraintRangePreviewCleared
         )
-
-        # Forward popout lifecycle signals
         self.constraint_manager.popoutOpened.connect(self.popoutOpened)
         self.constraint_manager.popoutClosed.connect(self.popoutClosed)
         self.constraint_manager.popoutSegmentSelected.connect(self.popoutSegmentSelected)
-        # Forward undo/redo requests from popout
         self.constraint_manager.undoRequested.connect(self.undoRequested)
         self.constraint_manager.redoRequested.connect(self.redoRequested)
 
-        # Property editor signals
         self.property_editor.propertyChanged.connect(self.on_attribute_change)
         self.property_editor.propertyRemoved.connect(self.on_attribute_removed)
-        self.property_editor.propertyAdded.connect(lambda key: self.on_item_selected())
 
-    def set_suspended(self, suspended: bool):
-        """Set whether the sidebar is suspended (prevents updates)."""
+    def set_suspended(self, suspended: bool) -> None:
         self._suspended = bool(suspended)
 
-    def mark_ready(self):
-        """Mark the sidebar as ready for interaction."""
+    def mark_ready(self) -> None:
         self._ready = True
 
     def get_selected_index(self) -> Optional[int]:
-        """Get the currently selected element index."""
-        row = self.points_list.currentRow()
-        if row is None or row < 0:
+        if self.path is None or self._selected_index is None:
             return None
-        if self.path is None:
-            return None
-        if row >= len(self.path.path_elements):
-            return None
-        return row
-
-    def _find_index_by_identity(self, identity: int) -> Optional[int]:
-        """Resolve a model index by Python object identity."""
-        if self.path is None:
-            return None
-        try:
-            target_id = int(identity)
-        except Exception:
-            return None
-        for i, element in enumerate(self.path.path_elements):
-            if id(element) == target_id:
-                return i
+        if 0 <= int(self._selected_index) < len(self.path.path_elements):
+            return int(self._selected_index)
         return None
 
-    def select_index(self, index: int, propagate_to_canvas: bool = True, defer: bool = True):
-        """Select an element by index."""
-        if index is None:
-            return
-        if index < 0 or index >= self.points_list.count():
-            return
-        # Selecting from the elements list should clear any active constraint preview
-        try:
-            self.constraint_manager.clear_active_preview()
-        except Exception:
-            pass
+    def _find_index_by_identity(self, identity: int) -> Optional[int]:
+        if self.path is None:
+            return None
+        for index, element in enumerate(self.path.path_elements):
+            if id(element) == int(identity):
+                return index
+        return None
 
-        # Capture scroll positions before any changes
-        points_scroll_pos = self.points_list.verticalScrollBar().value()
-        constraints_scroll_pos = self.constraints_scroll.verticalScrollBar().value()
+    def _selected_constraint(self) -> Optional[RangedConstraint]:
+        if self.path is None or self._selected_constraint_ref is None:
+            return None
+        key, start_ordinal, end_ordinal = self._selected_constraint_ref
+        for rc in getattr(self.path, "ranged_constraints", []) or []:
+            if (
+                getattr(rc, "key", None) == key
+                and int(getattr(rc, "start_ordinal", -1)) == int(start_ordinal)
+                and int(getattr(rc, "end_ordinal", -1)) == int(end_ordinal)
+            ):
+                return rc
+        return None
 
-        # Defer selection to avoid re-entrancy during fullscreen/layout changes
-        # Disable auto-scrolling to preserve user's scroll position
-        self.points_list.disable_auto_scroll_temporarily()
-
-        suppress_emit = not bool(propagate_to_canvas)
-
-        def do_selection_and_restore(i, pts_scroll, const_scroll, suppress):
-            # Only suppress if the row is actually changing; otherwise we'd suppress
-            # a future real user selection due to no itemSelectionChanged emission.
-            try:
-                if suppress and self.points_list.currentRow() != i:
-                    self._suppress_element_selected_emit_once = True
-            except Exception:
-                pass
-            try:
-                self.points_list.setCurrentRow(i)
-            finally:
-                self.points_list.enable_auto_scroll()
-            # Restore scroll positions after Qt has finished processing the selection
-            QTimer.singleShot(
-                20,
-                lambda: (
-                    self.points_list.verticalScrollBar().setValue(pts_scroll),
-                    self.constraints_scroll.verticalScrollBar().setValue(const_scroll),
-                ),
-            )
-            # Additional restoration as backup in case the first one is overridden
-            QTimer.singleShot(
-                100,
-                lambda: (
-                    self.points_list.verticalScrollBar().setValue(pts_scroll),
-                    self.constraints_scroll.verticalScrollBar().setValue(const_scroll),
-                ),
-            )
-
-        if defer:
-            QTimer.singleShot(
-                0,
-                lambda: do_selection_and_restore(
-                    index, points_scroll_pos, constraints_scroll_pos, suppress_emit
-                ),
-            )
-        else:
-            do_selection_and_restore(
-                index, points_scroll_pos, constraints_scroll_pos, suppress_emit
-            )
-
-    def clear_selection(self):
-        """Clear list selection and hide element controls."""
-        try:
-            self.points_list.clearSelection()
-            self.points_list.setCurrentRow(-1)
-        except Exception:
-            pass
-        self._last_emitted_selected_index = None
-        self._suppress_element_selected_emit_once = False
-        self._selected_element_identity = None
-        self.hide_spinners()
-
-    def _check_and_swap_rotation_targets(self) -> bool:
-        """Compatibility shim: call ElementManager rotation ordering logic.
-
-        Older code paths (e.g., main window drag-finish handler) expect the
-        Sidebar to expose a private helper for reordering rotation targets
-        after drags. The refactor moved that logic into
-        ElementManager.check_and_swap_rotation_targets(). Provide this thin
-        delegating wrapper so existing calls keep working.
-        """
-        try:
-            if hasattr(self, "element_manager") and self.element_manager is not None:
-                return bool(self.element_manager.check_and_swap_rotation_targets())
-        except Exception:
-            pass
-        return False
-
-    def refresh_current_selection(self):
-        """Re-run expose for current selection using current model values."""
-        self.on_item_selected()
-
-    def hide_spinners(self):
-        """Hide all property controls."""
-        self.property_editor.hide_all_properties()
-        self.type_combo.setVisible(False)
-        self.type_label.setVisible(False)
-        self.form_container.setVisible(False)
-        self.title_bar.setVisible(False)
-        # Hide constraints section too
-        self.constraints_title_bar.setVisible(False)
-        self.constraints_form_container.setVisible(False)
-
-    def update_current_values_only(self):
-        """Update only the values of visible controls."""
-        idx = self.get_selected_index()
-        if idx is None or self.path is None:
-            return
-        element = self.path.get_element(idx)
-        self.property_editor.update_values_only(element)
-
-    def set_path(self, path: Path):
-        """Set the path to edit."""
+    def set_path(self, path: Path) -> None:
         self.path = path
-        self._last_emitted_selected_index = None
-        self._suppress_element_selected_emit_once = False
-        self._selected_element_identity = None
         self.element_manager.set_path(path)
         self.constraint_manager.set_path(path)
 
-        # Update project managers in components if available
-        if hasattr(self, "project_manager") and self.project_manager:
+        if self.project_manager is not None:
             self.element_manager.project_manager = self.project_manager
             self.constraint_manager.project_manager = self.project_manager
             self.property_editor.project_manager = self.project_manager
 
-        # Rebuild UI
-        self.rebuild_points_list()
+        self.refresh_current_selection()
 
-        # Restore UI state if there are elements and one was previously selected
-        if self.path and self.path.path_elements:
-            # Try to restore the last selected index, or select the first element
-            last_selected = getattr(self, "_last_selected_index", 0)
-            if last_selected < len(self.path.path_elements):
-                self.select_index(last_selected)
-                # Force refresh the selection to restore optional spinners
-                QTimer.singleShot(0, self.refresh_current_selection)
-            else:
-                self.select_index(0)
-                QTimer.singleShot(0, self.refresh_current_selection)
-        else:
-            # Clear the UI if no path or no elements
-            self.hide_spinners()
-
-    def rebuild_points_list(self):
-        """Rebuild the elements list widget."""
-        # Capture scroll position before any changes
-        points_scroll_pos = self.points_list.verticalScrollBar().value()
-        constraints_scroll_pos = self.constraints_scroll.verticalScrollBar().value()
-
-        self.hide_spinners()
-
-        # Remove and delete any existing row widgets to prevent visual artifacts
-        try:
-            self.points_list.blockSignals(True)
-            for i in range(self.points_list.count()):
-                item = self.points_list.item(i)
-                w = self.points_list.itemWidget(item)
-                if w is not None:
-                    self.points_list.removeItemWidget(item)
-                    w.deleteLater()
-            self.points_list.clear()
-
-            # Rebuild add-element dropdown items based on selection context
-            self._refresh_add_dropdown_items()
-
-            if self.path:
-                for i, p in enumerate(self.path.path_elements):
-                    # Build a descriptive label with 1-based index and coordinates
-                    idx_prefix = f"{i + 1}."
-                    if isinstance(p, TranslationTarget):
-                        name = f"{idx_prefix} Translation ({p.x_meters:.1f}, {p.y_meters:.1f})"
-                    elif isinstance(p, RotationTarget):
-                        deg = math.degrees(p.rotation_radians) if p.rotation_radians is not None else 0.0
-                        name = f"{idx_prefix} Rotation ({deg:.1f}\u00b0)"
-                    elif isinstance(p, EventTrigger):
-                        name = f"{idx_prefix} Event Trigger"
-                    elif isinstance(p, Waypoint):
-                        name = f"{idx_prefix} Waypoint ({p.translation_target.x_meters:.1f}, {p.translation_target.y_meters:.1f})"
-                    else:
-                        name = f"{idx_prefix} Unknown"
-
-                    # Use an empty QListWidgetItem and render all visuals via a row widget
-                    item = QListWidgetItem("")
-                    item.setData(Qt.UserRole, i)
-
-                    # Build row widget with label and remove button
-                    row_widget = QWidget()
-                    row_layout = QHBoxLayout(row_widget)
-                    row_layout.setContentsMargins(6, 0, 6, 0)
-                    row_layout.setSpacing(6)
-                    label = QLabel(name)
-                    label.setStyleSheet("color: #f0f0f0;")
-                    row_layout.addWidget(label)
-                    row_layout.addStretch()
-
-                    remove_btn = QPushButton()
-                    remove_btn.setIcon(QIcon(":/assets/remove_icon.png"))
-                    remove_btn.setToolTip("Remove element")
-                    remove_btn.setFixedSize(24, 24)
-                    remove_btn.setIconSize(QSize(16, 16))
-                    remove_btn.setStyleSheet(
-                        "QPushButton { border: none; } QPushButton:hover { background: #555; border-radius: 3px; }"
-                    )
-                    # Capture current index by default-arg
-                    remove_btn.clicked.connect(
-                        lambda checked=False, idx_to_remove=i: self._on_remove_element(
-                            idx_to_remove
-                        )
-                    )
-                    row_layout.addWidget(remove_btn)
-
-                    # Ensure the row height matches the widget
-                    item.setSizeHint(row_widget.sizeHint())
-                    self.points_list.addItem(item)
-                    self.points_list.setItemWidget(item, row_widget)
-        finally:
-            self.points_list.blockSignals(False)
-
-        # Force restore scroll positions multiple times to overcome Qt's automatic adjustments
-        def restore_scrolls():
-            self.points_list.verticalScrollBar().setValue(points_scroll_pos)
-            self.constraints_scroll.verticalScrollBar().setValue(constraints_scroll_pos)
-
-        # Restore immediately
-        restore_scrolls()
-
-        # And restore again after a short delay to overcome any deferred Qt adjustments
-        QTimer.singleShot(10, restore_scrolls)
-        QTimer.singleShot(50, restore_scrolls)
-
-        # Sync popout if open — element changes affect domain sizes and ordinals
-        try:
-            self.constraint_manager._sync_popout(full_rebuild=True)
-        except Exception:
-            pass
-
-    def on_item_selected(self):
-        """Handle selection of an element in the list."""
-        try:
-            # Guard against re-entrancy and layout instability
-            if getattr(self, "_suspended", False) or not getattr(self, "_ready", False):
-                return
-
-            idx = self.get_selected_index()
-            if idx is None or self.path is None:
-                self._selected_element_identity = None
-                self.hide_spinners()
-                return
-
-            # Clear any active ranged preview when selecting a list element
-            try:
-                self.constraint_manager.clear_active_preview()
-            except Exception:
-                pass
-
-            # Store the selected index for restoration when paths are reloaded
-            self._last_selected_index = idx
-
-            # Validate index bounds
-            if idx < 0 or idx >= len(self.path.path_elements):
-                self._selected_element_identity = None
-                self.hide_spinners()
-                return
-
-            # Safely get element
-            try:
-                element = self.path.get_element(idx)
-            except (IndexError, RuntimeError):
-                self._selected_element_identity = None
-                self.hide_spinners()
-                return
-            self._selected_element_identity = id(self.path.path_elements[idx])
-
-            # Clear and hide existing UI
-            self.optional_pop.clear()
-            self.hide_spinners()
-
-            # Expose element properties
-            try:
-                self._expose_element(element)
-            except (RuntimeError, AttributeError):
-                return
-
-            # Determine element type safely
-            try:
-                if isinstance(element, TranslationTarget):
-                    current_type = ElementType.TRANSLATION
-                elif isinstance(element, RotationTarget):
-                    current_type = ElementType.ROTATION
-                elif isinstance(element, EventTrigger):
-                    current_type = ElementType.EVENT_TRIGGER
-                else:
-                    current_type = ElementType.WAYPOINT
-            except RuntimeError:
-                return
-
-            # Rebuild type combo
-            try:
-                self._rebuild_type_combo_for_index(idx, current_type)
-            except (RuntimeError, AttributeError):
-                pass
-
-            # Refresh add-element options
-            try:
-                self._refresh_add_dropdown_items()
-            except (RuntimeError, AttributeError):
-                pass
-
-            # Show controls
-            try:
-                for widget in (
-                    self.type_label,
-                    self.type_combo,
-                    self.form_container,
-                    self.title_bar,
-                    self.constraints_title_bar,
-                    self.constraints_form_container,
-                ):
-                    if widget is not None:
-                        widget.setVisible(True)
-            except (RuntimeError, AttributeError):
-                pass
-
-            if self._suppress_element_selected_emit_once:
-                self._suppress_element_selected_emit_once = False
-                self._last_emitted_selected_index = int(idx)
-            elif self._last_emitted_selected_index != int(idx):
-                try:
-                    self.elementSelected.emit(int(idx))
-                    self._last_emitted_selected_index = int(idx)
-                except Exception:
-                    pass
-
-            # Note: Scroll position restoration is handled by calling methods (like on_constraint_added)
-            # to avoid conflicts between multiple restoration attempts
-
-        except Exception as e:
-            # Fail safe: keep UI alive
-            self._selected_element_identity = None
-            self.hide_spinners()
-
-    def _expose_element(self, element):
-        """Expose properties for the selected element."""
-        if element is None:
+    def select_index(self, index: int, propagate_to_canvas: bool = True, defer: bool = True) -> None:
+        if self.path is None or index is None:
+            return
+        if index < 0 or index >= len(self.path.path_elements):
             return
 
-        # Clear constraint range sliders
-        self.constraint_manager.clear_segment_bars()
+        def _apply_selection() -> None:
+            self.constraint_manager.clear_active_preview()
+            self._selected_constraint_ref = None
+            self._selected_index = int(index)
+            self._last_selected_index = int(index)
+            self._selected_element_identity = id(self.path.path_elements[index])
+            if not propagate_to_canvas and self._selected_index != self._last_emitted_selected_index:
+                self._suppress_element_selected_emit_once = True
+            self.on_item_selected()
 
-        # Get optional properties from property editor
-        optional_display_items = self.property_editor.expose_element_properties(element)
-
-        # Show path constraints and collect their optional items
-        constraint_optional_items = self._expose_path_constraints()
-
-        # Combine all optional items
-        all_optional_items = optional_display_items + constraint_optional_items
-
-        # Update optional dropdown with all items
-        if all_optional_items:
-            all_optional_items = list(dict.fromkeys(all_optional_items))
-            self.optional_pop.clear()
-            self.optional_pop.add_items(all_optional_items)
+        if defer:
+            QTimer.singleShot(0, _apply_selection)
         else:
-            self.optional_pop.clear()
+            _apply_selection()
 
-    def _expose_path_constraints(self):
-        """Show path-level constraints."""
-        # Capture constraints scroll position before rebuilding
-        constraints_scroll_pos = self.constraints_scroll.verticalScrollBar().value()
+    def clear_selection(self) -> None:
+        self._selected_index = None
+        self._selected_constraint_ref = None
+        self._selected_element_identity = None
+        self._last_selected_index = None
+        self._last_emitted_selected_index = None
+        self._suppress_element_selected_emit_once = False
+        self._show_empty_state()
 
-        optional_display_items = []
-        has_constraints = False
+    def refresh_current_selection(self) -> None:
+        if self._selected_constraint_ref is not None:
+            rc = self._selected_constraint()
+            if rc is not None:
+                self._show_constraint(rc)
+                return
+            self._selected_constraint_ref = None
 
-        if self.path is not None:
-            # Ensure constraints object exists
-            if not hasattr(self.path, "constraints") or self.path.constraints is None:
-                from models.path_model import Constraints
+        idx = self.get_selected_index()
+        if idx is not None:
+            self.on_item_selected()
+            return
 
-                self.path.constraints = Constraints()
+        if self._last_selected_index is not None and self.path is not None:
+            if 0 <= int(self._last_selected_index) < len(self.path.path_elements):
+                self._selected_index = int(self._last_selected_index)
+                self.on_item_selected()
+                return
 
-            # Helper: sanitize labels for menu display (strip HTML line breaks)
-            def _menu_label_for_key(key: str) -> str:
-                meta = SPINNER_METADATA.get(key, {})
-                return meta.get("label", key).replace("<br/>", " ")
+        self._show_empty_state()
 
-            for key in PATH_CONSTRAINT_KEYS:
-                # Check if constraint is present
-                has_constraint = self.constraint_manager.has_constraint(key)
-                constraint_value = self.constraint_manager.get_constraint_value(key)
+    def _show_empty_state(self) -> None:
+        self.property_editor.hide_all_properties()
+        self.title_bar.setVisible(False)
+        self.form_container.setVisible(False)
+        self.type_row.setVisible(False)
+        self.core_page.setVisible(False)
+        self.constraint_page.setVisible(False)
+        self.empty_state.setVisible(True)
 
-                if has_constraint and key in self.spinners:
-                    control, label, btn, spin_row = self.spinners[key]
+    def hide_spinners(self) -> None:
+        self.property_editor.hide_all_properties()
+        self.type_row.setVisible(False)
+        self.core_page.setVisible(False)
+        self.constraint_page.setVisible(False)
+        self.form_container.setVisible(False)
+        self.title_bar.setVisible(False)
 
-                    # Set value
-                    try:
-                        control.blockSignals(True)
-                        value = constraint_value if constraint_value is not None else 0.0
-                        control.setValue(float(value))
-                    finally:
-                        control.blockSignals(False)
+    def _show_element(self, element) -> None:
+        self.property_editor.hide_all_properties()
+        self.constraint_page.setVisible(False)
+        self.core_page.setVisible(True)
+        self.type_row.setVisible(True)
+        self.form_container.setVisible(True)
+        self.title_bar.setVisible(True)
+        self.empty_state.setVisible(False)
 
-                    # Show controls
-                    label.setVisible(True)
-                    spin_row.setVisible(True)
-                    has_constraints = True
+        self.property_editor.expose_element_properties(element)
+        self.title_label.setText(self._get_entity_name(element))
 
-                    # Create range slider for applicable constraints
-                    if key in (
-                        "max_velocity_meters_per_sec",
-                        "max_acceleration_meters_per_sec2",
-                        "max_velocity_deg_per_sec",
-                        "max_acceleration_deg_per_sec2",
-                    ):
-                        self.constraint_manager.create_segment_bar_for_key(
-                            key, control, spin_row, label, self.constraints_layout
-                        )
+        current_type = ElementType.WAYPOINT
+        if isinstance(element, TranslationTarget):
+            current_type = ElementType.TRANSLATION
+        elif isinstance(element, RotationTarget):
+            current_type = ElementType.ROTATION
+        elif isinstance(element, EventTrigger):
+            current_type = ElementType.EVENT_TRIGGER
 
-                    # Add this new if block after the range slider creation
-                    if (
-                        key not in NON_RANGED_CONSTRAINT_KEYS
-                        and self.constraint_manager.can_add_more_instances(key)
-                    ):
-                        display = _menu_label_for_key(key) + " (+)"
-                        optional_display_items.append(display)
-                        self.property_editor.optional_display_to_key[display] = key
-                else:
-                    display = _menu_label_for_key(key)
-                    optional_display_items.append(display)
-                    self.property_editor.optional_display_to_key[display] = key
+        idx = self.get_selected_index()
+        if idx is not None:
+            self._rebuild_type_combo_for_index(idx, current_type)
 
-        # Force restore constraints scroll position after rebuilding
-        self.constraints_scroll.verticalScrollBar().setValue(constraints_scroll_pos)
+    def _show_constraint(self, constraint: RangedConstraint) -> None:
+        key = str(getattr(constraint, "key", ""))
+        meta = SPINNER_METADATA.get(key, {})
+        label = str(meta.get("label", key)).replace("<br/>", " ")
 
-        # Return optional items list
-        return optional_display_items
+        self.property_editor.hide_all_properties()
+        self.type_row.setVisible(False)
+        self.core_page.setVisible(False)
+        self.constraint_page.setVisible(True)
+        self.form_container.setVisible(True)
+        self.title_bar.setVisible(True)
+        self.empty_state.setVisible(False)
+        self.title_label.setText(label)
 
-    def _rebuild_type_combo_for_index(self, idx: int, current_type: ElementType):
-        """Rebuild type combo based on allowed types for the element position."""
+        self._configure_constraint_spinbox(key)
+        try:
+            self.constraint_value_spin.blockSignals(True)
+            self.constraint_value_spin.setValue(float(getattr(constraint, "value", 0.0)))
+        finally:
+            self.constraint_value_spin.blockSignals(False)
+
+    def update_current_values_only(self) -> None:
+        idx = self.get_selected_index()
+        if idx is not None and self.path is not None:
+            self.property_editor.update_values_only(self.path.get_element(idx))
+            return
+
+        rc = self._selected_constraint()
+        if rc is not None:
+            try:
+                self.constraint_value_spin.blockSignals(True)
+                self.constraint_value_spin.setValue(float(getattr(rc, "value", 0.0)))
+            finally:
+                self.constraint_value_spin.blockSignals(False)
+
+    def on_item_selected(self) -> None:
+        if self._suspended or not self._ready:
+            return
+
+        idx = self.get_selected_index()
+        if idx is None or self.path is None:
+            self._show_empty_state()
+            return
+
+        try:
+            element = self.path.get_element(idx)
+        except Exception:
+            self._show_empty_state()
+            return
+
+        self._selected_constraint_ref = None
+        self._selected_element_identity = id(element)
+        self._last_selected_index = idx
+        self._show_element(element)
+
+        if self._suppress_element_selected_emit_once:
+            self._suppress_element_selected_emit_once = False
+            self._last_emitted_selected_index = idx
+        elif self._last_emitted_selected_index != idx:
+            self.elementSelected.emit(idx)
+            self._last_emitted_selected_index = idx
+
+    def _rebuild_type_combo_for_index(self, idx: int, current_type: ElementType) -> None:
         if self.path is None:
             return
         is_end = idx == 0 or idx == len(self.path.path_elements) - 1
         allowed = [ELEMENT_TYPE_LABELS[e] for e in ElementType]
         if is_end and current_type not in (ElementType.ROTATION, ElementType.EVENT_TRIGGER):
-            allowed = [ELEMENT_TYPE_LABELS[ElementType.TRANSLATION], ELEMENT_TYPE_LABELS[ElementType.WAYPOINT]]
+            allowed = [
+                ELEMENT_TYPE_LABELS[ElementType.TRANSLATION],
+                ELEMENT_TYPE_LABELS[ElementType.WAYPOINT],
+            ]
         try:
             self.type_combo.blockSignals(True)
             self.type_combo.clear()
@@ -964,364 +460,108 @@ class Sidebar(QWidget):
         finally:
             self.type_combo.blockSignals(False)
 
-    def _refresh_add_dropdown_items(self):
-        """Refresh the add element dropdown based on current path state."""
-        # Allow adding rotation only if there are at least two translation or waypoint elements
-        if self.path is None:
-            self.add_element_pop.clear()
-            return
-        non_rot = sum(
-            1 for e in self.path.path_elements if not isinstance(e, (RotationTarget, EventTrigger))
-        )
-        items = [ELEMENT_TYPE_LABELS[ElementType.TRANSLATION], ELEMENT_TYPE_LABELS[ElementType.WAYPOINT]]
-        if non_rot >= 2:
-            items.append(ELEMENT_TYPE_LABELS[ElementType.ROTATION])
-            items.append(ELEMENT_TYPE_LABELS[ElementType.EVENT_TRIGGER])
-        self.add_element_pop.add_items(items)
-
-    def _insert_position_from_selection(self) -> int:
-        """Get insert position based on current selection."""
-        # Insert AFTER the selected row; if nothing selected, append at end
-        current_row = self.points_list.currentRow()
-        if current_row < 0:
-            return len(self.path.path_elements) if self.path else 0
-        return current_row + 1
-
-    def on_add_element_selected(self, type_text: str):
-        """Handle adding a new element."""
-        if self.path is None:
-            return
-
-        new_type = ELEMENT_LABEL_TO_TYPE.get(type_text) or ElementType(type_text)
-        insert_pos = self._insert_position_from_selection()
-        current_idx = self.get_selected_index()
-
-        # Announce about-to-change for undo snapshot
-        try:
-            self.aboutToChange.emit(f"Add {new_type.value}")
-        except Exception:
-            pass
-
-        # Snapshot elements before mutation for ordinal remap
-        old_elements = self.path.path_elements[:]
-
-        # Add element via manager
-        new_index = self.element_manager.add_element(new_type, insert_pos, current_idx)
-
-        # Update ranged constraint ordinals to reflect the new element list
-        remap_ranged_constraints(self.path, old_elements)
-
-        # Rebuild UI and select new element
-        self.rebuild_points_list()
-        self.select_index(new_index)
-
-        try:
-            self.userActionOccurred.emit(f"Add {new_type.value}")
-        except Exception:
-            pass
-
-    def _on_remove_element(self, idx_to_remove: int):
-        """Handle removing an element."""
-        if self.path is None:
-            return
-        if idx_to_remove < 0 or idx_to_remove >= len(self.path.path_elements):
-            return
-
-        # Get element for description
-        el = self.path.path_elements[idx_to_remove]
-        tname = (
-            "Waypoint"
-            if isinstance(el, Waypoint)
-            else (
-                "Rotation"
-                if isinstance(el, RotationTarget)
-                else "Event Trigger" if isinstance(el, EventTrigger) else "Translation"
-            )
-        )
-
-        # Announce about-to-change for undo snapshot
-        try:
-            self.aboutToChange.emit(f"Delete {tname}")
-        except Exception:
-            pass
-
-        # Snapshot elements before mutation for ordinal remap
-        old_elements = self.path.path_elements[:]
-
-        # Remove via manager
-        self.element_manager.remove_element(idx_to_remove)
-
-        # Update ranged constraint ordinals to reflect the removed element
-        remap_ranged_constraints(self.path, old_elements)
-
-        # Rebuild list and update selection
-        self.rebuild_points_list()
-        if self.path.path_elements:
-            new_sel = min(idx_to_remove, len(self.path.path_elements) - 1)
-            self.select_index(new_sel)
-
-        try:
-            self.userActionOccurred.emit(f"Delete {tname}")
-        except Exception:
-            pass
-
-    def on_type_change(self, value):
-        """Handle element type change."""
+    def on_type_change(self, value: str) -> None:
         idx = self.get_selected_index()
         if idx is None or self.path is None:
             return
 
         new_type = ELEMENT_LABEL_TO_TYPE.get(value) or ElementType(value)
-
-        # Announce about-to-change
-        try:
-            self.aboutToChange.emit(f"Change element type to {new_type.value}")
-        except Exception:
-            pass
-
-        # Snapshot elements before mutation for ordinal remap
         old_elements = self.path.path_elements[:]
+        self.aboutToChange.emit(f"Change element type to {new_type.value}")
 
-        # Change type via manager
         if self.element_manager.change_element_type(idx, new_type):
-            # Update ranged constraint ordinals to reflect the type change
             remap_ranged_constraints(self.path, old_elements)
+            self._selected_index = idx
+            self.refresh_current_selection()
+            self.userActionOccurred.emit(f"Change element type to {new_type.value}")
 
-            self.rebuild_points_list()
-            self.select_index(idx)
-
-            try:
-                self.userActionOccurred.emit(f"Change element type to {new_type.value}")
-            except Exception:
-                pass
-
-    def on_points_list_reordered(self):
-        """Handle reordering of elements in the list."""
-        if self.path is None:
-            return
-
-        selected_model_index_before = None
-        selected_identity = None
-
-        # 1) Preferred source: model index snapshot captured at drag start.
-        try:
-            if hasattr(self.points_list, "consume_pre_drag_selected_model_index"):
-                selected_model_index_before = (
-                    self.points_list.consume_pre_drag_selected_model_index()
-                )
-        except Exception:
-            selected_model_index_before = None
-
-        if selected_model_index_before is not None and 0 <= selected_model_index_before < len(
-            self.path.path_elements
-        ):
-            selected_identity = id(self.path.path_elements[selected_model_index_before])
-        else:
-            selected_model_index_before = None
-
-        # 2) Cached selected identity from the last resolved selection.
-        if selected_identity is None:
-            cached_identity = getattr(self, "_selected_element_identity", None)
-            if isinstance(cached_identity, int):
-                resolved_idx = self._find_index_by_identity(cached_identity)
-                if resolved_idx is not None:
-                    selected_model_index_before = int(resolved_idx)
-                    selected_identity = int(cached_identity)
-
-        # 3) Last-resort fallback: currently selected UI item's stable model index.
-        if selected_identity is None:
-            try:
-                current_item = self.points_list.currentItem()
-                if current_item is not None:
-                    model_index = current_item.data(Qt.UserRole)
-                    if isinstance(model_index, int) and 0 <= model_index < len(
-                        self.path.path_elements
-                    ):
-                        selected_model_index_before = int(model_index)
-                        selected_identity = id(self.path.path_elements[selected_model_index_before])
-            except Exception:
-                selected_model_index_before = None
-
-        try:
-            self.aboutToChange.emit("Reorder elements")
-        except Exception:
-            pass
-
-        # New order by original indices from UI items
-        new_order = []
-        for i in range(self.points_list.count()):
-            item = self.points_list.item(i)
-            idx = item.data(Qt.UserRole)
-            if isinstance(idx, int):
-                new_order.append(idx)
-
-        # Snapshot elements before mutation for ordinal remap
-        old_elements = self.path.path_elements[:]
-
-        # Apply reorder via manager
-        self.element_manager.reorder_elements(new_order)
-
-        # Update ranged constraint ordinals to reflect the new order
-        remap_ranged_constraints(self.path, old_elements)
-
-        # Rebuild UI
-        self.rebuild_points_list()
-
-        # Preserve selection by element identity (not by row index).
-        restored_index = None
-        if selected_model_index_before is not None:
-            if selected_identity is not None:
-                restored_index = self._find_index_by_identity(selected_identity)
-            if restored_index is None and self.path.path_elements:
-                restored_index = max(
-                    0,
-                    min(int(selected_model_index_before), len(self.path.path_elements) - 1),
-                )
-        if restored_index is not None:
-            self.select_index(restored_index, defer=False)
-        elif selected_model_index_before is not None:
-            self.clear_selection()
-
-        try:
-            self.userActionOccurred.emit("Reorder elements")
-        except Exception:
-            pass
-
-    def on_attribute_change(self, key, value):
-        """Handle property value changes."""
-        idx = self.get_selected_index()
-        if idx is not None and self.path is not None:
-            element = self.path.get_element(idx)
-
-            # Build description
-            label_text = SPINNER_METADATA.get(key, {}).get("label", key).replace("<br/>", " ")
-
-            # Determine if it's a path constraint
-            if key in PATH_CONSTRAINT_KEYS:
-                desc = f"Edit Path Constraint: {label_text}"
-                try:
-                    self.aboutToChange.emit(desc)
-                except Exception:
-                    pass
-
-                # Update via constraint manager
-                self.constraint_manager.update_constraint_value(key, float(value))
-                self.constraint_manager._sync_popout()
-            else:
-                # Element property
-                entity = self._get_entity_name(element)
-                desc = f"Edit {entity} {label_text}"
-
-                try:
-                    self.aboutToChange.emit(desc)
-                except Exception:
-                    pass
-
-                # Update via property editor
-                self.property_editor.set_property_value(key, value, element)
-
-            self.modelChanged.emit()
-
-            try:
-                self.userActionOccurred.emit(desc)
-            except Exception:
-                pass
-
-    def on_attribute_removed(self, key):
-        """Handle property removal."""
+    def on_attribute_change(self, key, value) -> None:
         idx = self.get_selected_index()
         if idx is None or self.path is None:
             return
 
-        # Capture scroll positions before attribute removal
-        points_scroll_pos = self.points_list.verticalScrollBar().value()
-        constraints_scroll_pos = self.constraints_scroll.verticalScrollBar().value()
-
         element = self.path.get_element(idx)
-        label_text = SPINNER_METADATA.get(key, {}).get("label", key).replace("<br/>", " ")
-        desc = f"Remove {label_text}"
-
-        try:
-            self.aboutToChange.emit(desc)
-        except Exception:
-            pass
-
-        # Check if it's a path constraint
-        if key in PATH_CONSTRAINT_KEYS:
-            self.constraint_manager.remove_constraint(key)
-            self.constraint_manager._sync_popout(full_rebuild=True)
-        else:
-            # Set property to None
-            self.property_editor.set_property_value(key, None, element)
-
-        self.on_item_selected()
+        label_text = str(SPINNER_METADATA.get(key, {}).get("label", key)).replace("<br/>", " ")
+        desc = f"Edit {self._get_entity_name(element)} {label_text}"
+        self.aboutToChange.emit(desc)
+        self.property_editor.set_property_value(key, value, element)
         self.modelChanged.emit()
+        self.userActionOccurred.emit(desc)
 
-        # Force restore scroll positions after attribute removal
-        def restore_scrolls():
-            self.points_list.verticalScrollBar().setValue(points_scroll_pos)
-            self.constraints_scroll.verticalScrollBar().setValue(constraints_scroll_pos)
-
-        # Restore immediately and after a delay
-        restore_scrolls()
-        QTimer.singleShot(50, restore_scrolls)
-        QTimer.singleShot(150, restore_scrolls)
-
-        try:
-            self.userActionOccurred.emit(desc)
-        except Exception:
-            pass
-
-    def on_constraint_added(self, key):
-        """Handle adding a path constraint."""
-        if self.path is None:
+    def on_attribute_removed(self, key) -> None:
+        idx = self.get_selected_index()
+        if idx is None or self.path is None:
             return
 
-        # Capture scroll positions before constraint addition
-        points_scroll_pos = self.points_list.verticalScrollBar().value()
-        constraints_scroll_pos = self.constraints_scroll.verticalScrollBar().value()
-
-        # Translate display name back to actual key if needed
-        real_key = self.property_editor.optional_display_to_key.get(key, key)
-        # If user selected a "+" variant manually entered, strip it
-        if (
-            real_key.endswith(" (+)")
-            and real_key not in self.property_editor.optional_display_to_key
-        ):
-            real_key = real_key.replace(" (+)", "")
-
-        label_text = SPINNER_METADATA.get(real_key, {}).get("label", real_key).replace("<br/>", " ")
-
-        try:
-            self.aboutToChange.emit(f"Add {label_text}")
-        except Exception:
-            pass
-
-        # Add constraint via manager
-        self.constraint_manager.add_constraint(real_key)
-
-        # Refresh UI
+        element = self.path.get_element(idx)
+        label_text = str(SPINNER_METADATA.get(key, {}).get("label", key)).replace("<br/>", " ")
+        desc = f"Remove {label_text}"
+        self.aboutToChange.emit(desc)
+        self.property_editor.set_property_value(key, None, element)
         self.refresh_current_selection()
-        self.constraint_manager._sync_popout(full_rebuild=True)
         self.modelChanged.emit()
+        self.userActionOccurred.emit(desc)
 
-        # Force restore scroll positions after constraint addition
-        def restore_scrolls():
-            self.points_list.verticalScrollBar().setValue(points_scroll_pos)
-            self.constraints_scroll.verticalScrollBar().setValue(constraints_scroll_pos)
+    def _configure_constraint_spinbox(self, key: str) -> None:
+        meta = SPINNER_METADATA.get(key, {})
+        step = float(meta.get("step", 0.1))
+        min_val, max_val = meta.get("range", (0.0, 99999.0))
+        suffix = ""
+        label_text = str(meta.get("label", key)).replace("<br/>", " ")
+        if "(" in label_text and label_text.endswith(")"):
+            suffix = " " + label_text[label_text.rfind("(") + 1 : -1]
+            if suffix.strip() in {"0-1", "0–1"}:
+                suffix = ""
 
-        # Restore immediately and after a delay
-        restore_scrolls()
-        QTimer.singleShot(50, restore_scrolls)
-        QTimer.singleShot(150, restore_scrolls)
+        decimals = 0
+        if "." in str(step):
+            decimals = len(str(step).rstrip("0").split(".")[-1])
 
+        self.constraint_value_spin.setSingleStep(step)
+        self.constraint_value_spin.setRange(float(min_val), float(max_val))
+        self.constraint_value_spin.setDecimals(max(0, min(4, decimals if decimals else 3)))
+        self.constraint_value_spin.setSuffix(suffix)
+
+    def on_constraint_value_changed(self, value: float) -> None:
+        constraint = self._selected_constraint()
+        if constraint is None:
+            return
+
+        label_text = str(SPINNER_METADATA.get(constraint.key, {}).get("label", constraint.key))
+        label_text = label_text.replace("<br/>", " ")
+        desc = f"Edit Constraint Value: {label_text}"
+        self.aboutToChange.emit(desc)
+        constraint.value = float(value)
+        self.modelChanged.emit()
+        self.userActionOccurred.emit(desc)
+
+    def _check_and_swap_rotation_targets(self) -> bool:
         try:
-            self.userActionOccurred.emit(f"Add {label_text}")
+            return bool(self.element_manager.check_and_swap_rotation_targets())
         except Exception:
-            pass
+            return False
+
+    def rebuild_points_list(self) -> None:
+        self.refresh_current_selection()
+
+    def _on_remove_element(self, idx_to_remove: int) -> None:
+        if self.path is None:
+            return
+        if idx_to_remove < 0 or idx_to_remove >= len(self.path.path_elements):
+            return
+
+        old_elements = self.path.path_elements[:]
+        self.element_manager.remove_element(idx_to_remove)
+        remap_ranged_constraints(self.path, old_elements)
+
+        if self.path.path_elements:
+            self._selected_index = min(idx_to_remove, len(self.path.path_elements) - 1)
+            self._last_selected_index = self._selected_index
+            self.refresh_current_selection()
+        else:
+            self.clear_selection()
 
     def _get_entity_name(self, element) -> str:
-        """Get a descriptive name for an element type."""
         if isinstance(element, Waypoint):
             return "Waypoint"
         if isinstance(element, RotationTarget):
@@ -1332,53 +572,31 @@ class Sidebar(QWidget):
             return "Translation"
         return "Element"
 
-    def _delete_via_shortcut(self):
-        """Handle delete keyboard shortcut."""
-        # Emit a deletion request so the owner can handle model + undo coherently
-        try:
-            self.deleteSelectedRequested.emit()
-        except Exception:
-            pass
+    def _delete_via_shortcut(self) -> None:
+        self.deleteSelectedRequested.emit()
 
     def eventFilter(self, obj, event):
-        """Handle events for constraint preview management."""
         try:
-            et = event.type()
-
-            # Handle clicks/double-clicks to manage constraint preview
-            if et in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick):
-                # If click is on the sidebar itself, determine the child under the cursor
+            if event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick):
                 target_widget = obj
-                try:
-                    if obj is self:
-                        ev = event
-                        pos = getattr(ev, "position", None)
-                        if pos is not None:
-                            pt = pos().toPoint() if callable(pos) else pos.toPoint()
-                        else:
-                            pt = getattr(ev, "pos", lambda: None)()
-                        if pt is not None:
-                            child = self.childAt(pt)
-                            if child is not None:
-                                target_widget = child
-                except Exception:
-                    target_widget = obj
+                if obj is self:
+                    try:
+                        pt = event.position().toPoint()
+                    except Exception:
+                        pt = event.pos()
+                    child = self.childAt(pt)
+                    if child is not None:
+                        target_widget = child
 
-                # Check if clicking on any range-related control
-                if self.constraint_manager.is_widget_range_related(target_widget):
+                if self.is_widget_range_related(target_widget):
                     return False
 
-                # Clicked somewhere else → clear overlay
                 self.constraint_manager.clear_active_preview()
-                return False
-
         except Exception:
             pass
         return super().eventFilter(obj, event)
 
-    # ---- Public helpers for external widgets to control constraint preview ----
-    def clear_active_preview(self):
-        """Clear active constraint preview."""
+    def clear_active_preview(self) -> None:
         self.constraint_manager.clear_active_preview()
 
     def select_constraint_range(
@@ -1389,19 +607,38 @@ class Sidebar(QWidget):
         *,
         emit_preview: bool = True,
     ) -> bool:
-        """Select a specific ranged-constraint segment in the sidebar controls."""
-        try:
-            return bool(
-                self.constraint_manager.select_segment_by_ordinals(
-                    key,
-                    start_ordinal,
-                    end_ordinal,
-                    emit_preview=emit_preview,
-                )
-            )
-        except Exception:
+        if self.path is None:
             return False
 
+        self._selected_constraint_ref = (str(key), int(start_ordinal), int(end_ordinal))
+        self._selected_index = None
+        self._selected_element_identity = None
+        self._last_emitted_selected_index = None
+        self._suppress_element_selected_emit_once = False
+
+        rc = self._selected_constraint()
+        if rc is None:
+            self._selected_constraint_ref = None
+            self._show_empty_state()
+            return False
+
+        if emit_preview:
+            self.constraintRangePreviewRequested.emit(str(key), int(start_ordinal), int(end_ordinal))
+        self._show_constraint(rc)
+        return True
+
     def is_widget_range_related(self, widget: QWidget) -> bool:
-        """Check if widget is range-related."""
-        return self.constraint_manager.is_widget_range_related(widget)
+        if self.constraint_manager.is_widget_range_related(widget):
+            return True
+        if widget is None or self._selected_constraint_ref is None:
+            return False
+        try:
+            if widget is self.constraint_page or self.constraint_page.isAncestorOf(widget):
+                return True
+            if widget is self.form_container or self.form_container.isAncestorOf(widget):
+                return True
+            if widget is self.title_bar or self.title_bar.isAncestorOf(widget):
+                return True
+        except Exception:
+            return False
+        return False

@@ -44,7 +44,7 @@ class PropertyEditor(QObject):
         self.optional_display_to_key: Dict[str, str] = {}
 
     def create_property_controls(
-        self, form_layout: QFormLayout, constraints_layout: QFormLayout
+        self, form_layout: QFormLayout, constraints_layout: Optional[QFormLayout] = None
     ) -> Dict[str, Tuple[Any, QLabel, QPushButton, QWidget]]:
         """Create all property control widgets."""
         spinners: Dict[str, Tuple[Any, QLabel, QPushButton, QWidget]] = {}
@@ -193,6 +193,8 @@ class PropertyEditor(QObject):
                     label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
                     form_layout.addRow(label, spin_row)
             elif section == "constraints":
+                if constraints_layout is None:
+                    continue
                 if constraint_row_index < 3:
                     group_name = "nonranged"
                     index_in_group = constraint_row_index
