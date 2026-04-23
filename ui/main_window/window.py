@@ -285,6 +285,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
 
         # Stabilization flag for fullscreen/window state transitions
         self._layout_stabilizing: bool = False
+        self._pending_startup_timeline_fit: bool = True
         # Track config-edit undo session state
         self._config_undo_recorded: bool = False
         self._config_edit_old_config: dict | None = None
@@ -1201,6 +1202,9 @@ class MainWindow(WindowEventMixin, QMainWindow):
         self.sidebar.set_path(self.path)
         self.canvas.set_path(self.path)
         self.timeline.set_path(self.path, self._timeline_config())
+        if self._pending_startup_timeline_fit:
+            self._pending_startup_timeline_fit = False
+            QTimer.singleShot(0, self.timeline.fit_to_all)
         # Update the current path display
         self._update_current_path_display()
         # Only autosave if this is a new path being created, not when loading existing paths

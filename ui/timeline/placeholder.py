@@ -42,6 +42,10 @@ BOTTOM_PADDING = 16
 RULER_HEIGHT = 28
 ROW_HEIGHT = 42
 ROW_GAP = 8
+MIN_ROW_HEIGHT = 28
+MIN_SPAN_ROW_HEIGHT = 24
+MIN_LANE_HEIGHT = 6
+MIN_LANE_GAP = 2
 MIN_ZOOM_PX_PER_M = 24
 MAX_ZOOM_PX_PER_M = 240
 DEFAULT_ZOOM_PX_PER_M = 72
@@ -81,6 +85,7 @@ class TimelineRow:
     spans: list[TimelineSpan] = field(default_factory=list)
     lane_count: int = 1
     constraint_key: str | None = None
+    constraint_keys: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -124,6 +129,107 @@ def _rows_total_height(rows: list[TimelineRow]) -> int:
     return sum(_row_height_for(row) for row in rows) + max(0, len(rows) - 1) * ROW_GAP
 
 
+def _row_min_height_for(row: TimelineRow) -> int:
+    if not row.spans:
+        return MIN_ROW_HEIGHT
+    lanes = max(1, int(row.lane_count))
+    return max(MIN_SPAN_ROW_HEIGHT, 8 + lanes * MIN_LANE_HEIGHT + max(0, lanes - 1) * MIN_LANE_GAP)
+
+
+def _constraint_row_keys(row: TimelineRow) -> list[str]:
+    keys = [str(key) for key in getattr(row, "constraint_keys", []) if str(key)]
+    if keys:
+        return keys
+    if row.constraint_key:
+        return [str(row.constraint_key)]
+    return []
+
+
+def _distribute_integer_heights(values: list[float], target_total: int) -> list[int]:
+    if not values:
+        return []
+    floored = [int(math.floor(value)) for value in values]
+    remainder = int(target_total - sum(floored))
+    if remainder > 0:
+        order = sorted(
+            range(len(values)),
+            key=lambda idx: (values[idx] - floored[idx]),
+            reverse=True,
+        )
+        for idx in order[:remainder]:
+            floored[idx] += 1
+    elif remainder < 0:
+        order = sorted(
+            range(len(values)),
+            key=lambda idx: (values[idx] - floored[idx]),
+        )
+        for idx in order[: abs(remainder)]:
+            floored[idx] -= 1
+    return floored
+
+
+def _row_layout(rows: list[TimelineRow], canvas_height: int) -> list[tuple[int, int]]:
+    if not rows:
+        return []
+
+    start_y = TOP_PADDING + RULER_HEIGHT
+    available_rows_h = max(0, int(canvas_height) - start_y - BOTTOM_PADDING)
+    gap_count = max(0, len(rows) - 1)
+
+    natural_heights = [_row_height_for(row) for row in rows]
+    min_heights = [_row_min_height_for(row) for row in rows]
+    absolute_min_heights = [1 for _ in rows]
+    natural_rows_h = sum(natural_heights)
+    min_rows_h = sum(min_heights)
+    absolute_min_rows_h = sum(absolute_min_heights)
+    if gap_count > 0:
+        max_gap = max(0.0, (available_rows_h - absolute_min_rows_h) / gap_count)
+        row_gap = max(0, int(math.floor(min(float(ROW_GAP), max_gap))))
+    else:
+        row_gap = 0
+    target_rows_h = max(absolute_min_rows_h, available_rows_h - gap_count * row_gap)
+
+    if natural_rows_h <= target_rows_h:
+        heights = list(natural_heights)
+    elif min_rows_h <= target_rows_h:
+        flex_total = sum(
+            max(0, natural_height - min_height)
+            for natural_height, min_height in zip(natural_heights, min_heights)
+        )
+        if flex_total <= 1e-9:
+            heights = list(min_heights)
+        else:
+            ratio = max(0.0, min(1.0, (target_rows_h - min_rows_h) / flex_total))
+            heights = [
+                min_height + (natural_height - min_height) * ratio
+                for natural_height, min_height in zip(natural_heights, min_heights)
+            ]
+    else:
+        flex_total = sum(
+            max(0, min_height - absolute_min_height)
+            for min_height, absolute_min_height in zip(min_heights, absolute_min_heights)
+        )
+        if flex_total <= 1e-9:
+            heights = list(absolute_min_heights)
+        else:
+            ratio = max(
+                0.0,
+                min(1.0, (target_rows_h - absolute_min_rows_h) / flex_total),
+            )
+            heights = [
+                absolute_min_height + (min_height - absolute_min_height) * ratio
+                for min_height, absolute_min_height in zip(min_heights, absolute_min_heights)
+            ]
+
+    heights_int = _distribute_integer_heights(heights, target_rows_h)
+    layout: list[tuple[int, int]] = []
+    y = start_y
+    for height in heights_int:
+        layout.append((y, max(1, int(height))))
+        y += int(height) + row_gap
+    return layout
+
+
 class _TimelineCanvasBase(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -141,6 +247,9 @@ class _TimelineCanvasBase(QWidget):
         height += BOTTOM_PADDING
         return QSize(HEADER_WIDTH, height)
 
+    def _row_layout(self) -> list[tuple[int, int]]:
+        return _row_layout(self._projection.rows, self.height())
+
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
@@ -151,11 +260,8 @@ class _TimelineCanvasBase(QWidget):
             return
 
         self._draw_ruler(painter)
-        row_top = TOP_PADDING + RULER_HEIGHT
-        for index, row in enumerate(self._projection.rows):
-            row_h = _row_height_for(row)
+        for index, (row, (row_top, row_h)) in enumerate(zip(self._projection.rows, self._row_layout())):
             self._draw_row(painter, row, row_top, row_h, index)
-            row_top += row_h + ROW_GAP
 
         painter.end()
 
@@ -255,6 +361,28 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         s_m = max(0.0, min(float(s_m), self._projection.display_s_m))
         return self._track_left() + s_m * self._zoom_px_per_m
 
+    def _track_rect_for_row(self, row_top: int, row_height: int) -> QRectF:
+        vertical_padding = max(0.5, min(7.0, float(row_height) * 0.16))
+        return QRectF(
+            self._track_left(),
+            row_top + vertical_padding,
+            self._track_width(),
+            max(1.0, row_height - (vertical_padding * 2.0)),
+        )
+
+    def _lane_metrics(self, row: TimelineRow, track_rect: QRectF) -> tuple[int, float, float, float]:
+        lane_count = max(1, int(row.lane_count))
+        available_h = max(1.0, track_rect.height())
+        lane_gap = 4.0
+        if lane_count > 1:
+            max_gap = (available_h - lane_count) / max(1, lane_count - 1)
+            lane_gap = max(0.0, min(lane_gap, max_gap))
+        total_lane_gap = lane_gap * max(0, lane_count - 1)
+        lane_h = max(1.0, (available_h - total_lane_gap) / lane_count)
+        lanes_block_h = lane_count * lane_h + total_lane_gap
+        lanes_top = track_rect.top() + max(0.0, (available_h - lanes_block_h) / 2.0)
+        return lane_count, lane_gap, lane_h, lanes_top
+
     def _draw_ruler(self, painter: QPainter) -> None:
         top = TOP_PADDING
         bottom = TOP_PADDING + RULER_HEIGHT
@@ -285,7 +413,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self, painter: QPainter, row: TimelineRow, y: int, row_height: int, index: int
     ) -> None:
         row_rect = QRectF(0, y, self.width(), row_height)
-        track_rect = QRectF(self._track_left(), y + 7, self._track_width(), max(10.0, row_height - 14))
+        track_rect = self._track_rect_for_row(y, row_height)
 
         painter.fillRect(
             row_rect,
@@ -383,13 +511,8 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         painter.restore()
 
     def _draw_spans(self, painter: QPainter, row: TimelineRow, track_rect: QRectF) -> None:
-        lane_count = max(1, int(row.lane_count))
-        lane_gap = 4.0
-        total_lane_gap = lane_gap * max(0, lane_count - 1)
-        available_h = max(10.0, track_rect.height())
-        lane_h = max(10.0, (available_h - total_lane_gap) / lane_count)
-        lanes_block_h = lane_count * lane_h + total_lane_gap
-        lanes_top = track_rect.top() + (available_h - lanes_block_h) / 2.0
+        lane_count, lane_gap, lane_h, lanes_top = self._lane_metrics(row, track_rect)
+        lanes_block_h = lane_count * lane_h + lane_gap * max(0, lane_count - 1)
         metrics = painter.fontMetrics()
 
         painter.setPen(QPen(QColor("#2f3740"), 1))
@@ -555,16 +678,9 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def _hit_test(self, x: float, y: float) -> tuple[str, object] | None:
         if self._y_in_ruler(y):
             return None
-        row_top = TOP_PADDING + RULER_HEIGHT
-        for row in self._projection.rows:
-            row_h = _row_height_for(row)
+        for row, (row_top, row_h) in zip(self._projection.rows, self._row_layout()):
             if row_top <= y <= row_top + row_h:
-                track_rect = QRectF(
-                    self._track_left(),
-                    row_top + 7,
-                    self._track_width(),
-                    max(10.0, row_h - 14),
-                )
+                track_rect = self._track_rect_for_row(row_top, row_h)
                 if row.spans:
                     for span, rect in self._iter_span_rects(row, track_rect):
                         if rect.adjusted(-3.0, -2.0, 3.0, 2.0).contains(x, y):
@@ -581,17 +697,10 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                         if marker_rect.contains(x, y):
                             return ("marker", marker)
                 return None
-            row_top += row_h + ROW_GAP
         return None
 
     def _iter_span_rects(self, row: TimelineRow, track_rect: QRectF):
-        lane_count = max(1, int(row.lane_count))
-        lane_gap = 4.0
-        total_lane_gap = lane_gap * max(0, lane_count - 1)
-        available_h = max(10.0, track_rect.height())
-        lane_h = max(10.0, (available_h - total_lane_gap) / lane_count)
-        lanes_block_h = lane_count * lane_h + total_lane_gap
-        lanes_top = track_rect.top() + (available_h - lanes_block_h) / 2.0
+        _, lane_gap, lane_h, lanes_top = self._lane_metrics(row, track_rect)
         for span in row.spans:
             x0 = self._x_for_s(span.start_s_m)
             x1 = self._x_for_s(span.end_s_m)
@@ -671,6 +780,7 @@ class TimelineDock(QFrame):
         self._current_time_s = 0.0
         self._total_time_s = 0.0
         self._is_playing = False
+        self._minimum_zoom_px_per_m = MIN_ZOOM_PX_PER_M
         self._play_pause_btn: QPushButton
         self._playback_label: QLabel
         self._summary_label: QLabel
@@ -683,20 +793,20 @@ class TimelineDock(QFrame):
         self._setup_ui()
         self.set_path(path or Path(), {})
 
-    @staticmethod
-    def _zoom_value_from_slider(slider_value: int) -> int:
+    def _zoom_value_from_slider(self, slider_value: int) -> int:
         clamped = max(ZOOM_SLIDER_MIN, min(ZOOM_SLIDER_MAX, int(slider_value)))
         alpha = (clamped - ZOOM_SLIDER_MIN) / max(1, ZOOM_SLIDER_MAX - ZOOM_SLIDER_MIN)
-        min_zoom = float(MIN_ZOOM_PX_PER_M)
+        min_zoom = float(max(MIN_ZOOM_PX_PER_M, int(self._minimum_zoom_px_per_m)))
         max_zoom = float(MAX_ZOOM_PX_PER_M)
+        if max_zoom <= min_zoom:
+            return int(round(min_zoom))
         zoom = min_zoom * ((max_zoom / min_zoom) ** alpha)
-        return max(MIN_ZOOM_PX_PER_M, min(MAX_ZOOM_PX_PER_M, int(round(zoom))))
+        return max(int(round(min_zoom)), min(MAX_ZOOM_PX_PER_M, int(round(zoom))))
 
-    @staticmethod
-    def _slider_value_from_zoom(zoom_value: float) -> int:
-        zoom = max(float(MIN_ZOOM_PX_PER_M), min(float(MAX_ZOOM_PX_PER_M), float(zoom_value)))
-        min_zoom = float(MIN_ZOOM_PX_PER_M)
+    def _slider_value_from_zoom(self, zoom_value: float) -> int:
+        min_zoom = float(max(MIN_ZOOM_PX_PER_M, int(self._minimum_zoom_px_per_m)))
         max_zoom = float(MAX_ZOOM_PX_PER_M)
+        zoom = max(min_zoom, min(max_zoom, float(zoom_value)))
         if max_zoom <= min_zoom:
             return ZOOM_SLIDER_MIN
         alpha = math.log(zoom / min_zoom) / math.log(max_zoom / min_zoom)
@@ -838,7 +948,7 @@ class TimelineDock(QFrame):
         self._track_scroll = QScrollArea()
         self._track_scroll.setWidgetResizable(False)
         self._track_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self._track_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._track_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._track_scroll.viewport().installEventFilter(self)
 
         self._track_canvas = _TimelineTrackCanvas()
@@ -868,9 +978,7 @@ class TimelineDock(QFrame):
             self._rail_scroll.viewport(),
         }:
             self._sync_canvas_size()
-        if watched is self._rail_scroll.viewport() and event.type() == QEvent.Wheel:
-            self._forward_vertical_wheel(event)
-            return True
+            self._update_minimum_zoom(enforce_current=True)
         return super().eventFilter(watched, event)
 
     def set_path(self, path: Path | None, config: dict[str, object] | None = None) -> None:
@@ -884,19 +992,14 @@ class TimelineDock(QFrame):
         self._restore_selection()
         self._track_canvas.set_playhead(self._current_time_s, self._is_playing)
         self._sync_canvas_size()
+        self._update_minimum_zoom(enforce_current=had_meaningful_projection)
         if not had_meaningful_projection and self._projection.total_s_m > 1e-9:
             QTimer.singleShot(0, self.fit_to_all)
         else:
             self._ensure_playhead_visible()
 
     def fit_to_all(self) -> None:
-        display_s_m = max(self._projection.display_s_m, 0.0)
-        if display_s_m <= 0.0:
-            return
-        viewport_width = max(1, self._track_scroll.viewport().width() - TRACK_PADDING_X * 2)
-        zoom = int(round(viewport_width / display_s_m))
-        zoom = max(MIN_ZOOM_PX_PER_M, min(MAX_ZOOM_PX_PER_M, zoom))
-        self._zoom_slider.setValue(self._slider_value_from_zoom(zoom))
+        self._set_zoom_px_per_m(self._fit_zoom_px_per_m())
 
     def _adjust_zoom(self, delta: int) -> None:
         self._zoom_slider.setValue(self._zoom_slider.value() + int(delta))
@@ -924,6 +1027,13 @@ class TimelineDock(QFrame):
 
     def _on_zoom_changed(self, value: int) -> None:
         zoom_px_per_m = self._zoom_value_from_slider(value)
+        self._apply_zoom_px_per_m(zoom_px_per_m)
+
+    def _apply_zoom_px_per_m(self, zoom_px_per_m: int) -> None:
+        zoom_px_per_m = max(
+            int(self._minimum_zoom_px_per_m),
+            min(MAX_ZOOM_PX_PER_M, int(round(zoom_px_per_m))),
+        )
         hbar = self._track_scroll.horizontalScrollBar()
         playhead_x_before = TRACK_PADDING_X + self._current_time_s * float(
             self._track_canvas._zoom_px_per_m
@@ -937,19 +1047,54 @@ class TimelineDock(QFrame):
         playhead_x_after = TRACK_PADDING_X + self._current_time_s * float(zoom_px_per_m)
         hbar.setValue(int(round(playhead_x_after - playhead_offset_in_view)))
 
+    def _set_zoom_px_per_m(self, zoom_px_per_m: int) -> None:
+        clamped_zoom = max(
+            int(self._minimum_zoom_px_per_m),
+            min(MAX_ZOOM_PX_PER_M, int(round(zoom_px_per_m))),
+        )
+        slider_value = self._slider_value_from_zoom(clamped_zoom)
+        self._zoom_slider.blockSignals(True)
+        self._zoom_slider.setValue(slider_value)
+        self._zoom_slider.blockSignals(False)
+        self._apply_zoom_px_per_m(clamped_zoom)
+
+    def _fit_zoom_px_per_m(self) -> int:
+        display_s_m = max(self._projection.display_s_m, 0.0)
+        if display_s_m <= 0.0:
+            return MIN_ZOOM_PX_PER_M
+        viewport_width = max(1, self._track_scroll.viewport().width() - TRACK_PADDING_X * 2)
+        zoom = int(round(viewport_width / display_s_m))
+        return max(MIN_ZOOM_PX_PER_M, min(MAX_ZOOM_PX_PER_M, zoom))
+
+    def _update_minimum_zoom(self, *, enforce_current: bool) -> None:
+        new_min_zoom = self._fit_zoom_px_per_m()
+        if new_min_zoom == int(self._minimum_zoom_px_per_m):
+            if enforce_current and self._track_canvas._zoom_px_per_m < new_min_zoom:
+                self._set_zoom_px_per_m(new_min_zoom)
+            return
+        self._minimum_zoom_px_per_m = int(new_min_zoom)
+        current_zoom = max(int(self._track_canvas._zoom_px_per_m), int(self._minimum_zoom_px_per_m))
+        if enforce_current:
+            self._set_zoom_px_per_m(current_zoom)
+            return
+        slider_value = self._slider_value_from_zoom(current_zoom)
+        self._zoom_slider.blockSignals(True)
+        self._zoom_slider.setValue(slider_value)
+        self._zoom_slider.blockSignals(False)
+
     def _sync_canvas_size(self) -> None:
         rail_hint = self._rail_canvas.sizeHint()
         track_hint = self._track_canvas.sizeHint()
         track_viewport_width = max(0, self._track_scroll.viewport().width())
         viewport_height = max(0, self._track_scroll.viewport().height())
-        rail_height = max(rail_hint.height(), viewport_height)
+        rail_height = max(1, viewport_height)
         track_width = max(track_hint.width(), track_viewport_width)
-        track_height = max(track_hint.height(), viewport_height)
+        track_height = max(1, viewport_height)
 
         self._rail_canvas.resize(HEADER_WIDTH, rail_height)
-        self._rail_canvas.setMinimumSize(HEADER_WIDTH, rail_hint.height())
+        self._rail_canvas.setMinimumSize(HEADER_WIDTH, 1)
         self._track_canvas.resize(track_width, track_height)
-        self._track_canvas.setMinimumSize(track_width, track_hint.height())
+        self._track_canvas.setMinimumSize(track_width, 1)
         self._rail_scroll.verticalScrollBar().setPageStep(
             self._track_scroll.verticalScrollBar().pageStep()
         )
@@ -1081,20 +1226,6 @@ class TimelineDock(QFrame):
         elif playhead_x > visible_right - margin:
             hbar.setValue(int(round(playhead_x - viewport_width + margin)))
 
-    def _forward_vertical_wheel(self, event) -> None:
-        scrollbar = self._track_scroll.verticalScrollBar()
-        delta_y = 0
-        try:
-            delta_y = int(event.angleDelta().y())
-        except Exception:
-            delta_y = 0
-        if delta_y == 0:
-            return
-        step = scrollbar.singleStep() or 20
-        direction = -1 if delta_y > 0 else 1
-        scrollbar.setValue(scrollbar.value() + direction * step * 3)
-
-
 TimelinePlaceholder = TimelineDock
 
 
@@ -1213,18 +1344,21 @@ def _build_projection(
         ),
     ]
 
-    for key in RANGED_CONSTRAINT_KEYS:
-        spans = _build_constraint_spans(path, key, path_elements, anchor_s_by_path_index)
-        lane_count = _lane_count_for_spans(spans)
-        rows.append(
-            TimelineRow(
-                title=_plain_label(str(SPINNER_METADATA.get(key, {}).get("label", key))),
-                empty_text="No ranges yet.",
-                spans=spans,
-                lane_count=lane_count,
-                constraint_key=key,
-            )
+    constraint_spans = _build_combined_constraint_spans(
+        path,
+        list(RANGED_CONSTRAINT_KEYS),
+        path_elements,
+        anchor_s_by_path_index,
+    )
+    rows.append(
+        TimelineRow(
+            title="Constraints",
+            empty_text="No ranges yet.",
+            spans=constraint_spans,
+            lane_count=_lane_count_for_spans(constraint_spans),
+            constraint_keys=list(RANGED_CONSTRAINT_KEYS),
         )
+    )
 
     display_s_m = max(total_s_m, 1.0 if structure_markers else 6.0)
     summary_text = (
@@ -1383,6 +1517,20 @@ def _build_constraint_spans(
     return spans
 
 
+def _build_combined_constraint_spans(
+    path: Path,
+    keys: list[str],
+    path_elements: list[object],
+    anchor_s_by_path_index: dict[int, float],
+) -> list[TimelineSpan]:
+    spans: list[TimelineSpan] = []
+    for key in keys:
+        spans.extend(_build_constraint_spans(path, key, path_elements, anchor_s_by_path_index))
+    spans.sort(key=lambda span: (span.start_s_m, span.end_s_m, span.label))
+    _assign_span_lanes(spans)
+    return spans
+
+
 def _build_constraint_spans_for_axis(
     path: Path,
     key: str,
@@ -1484,6 +1632,30 @@ def _build_constraint_spans_from_positions(
         )
 
     spans.sort(key=lambda span: (span.start_s_m, span.end_s_m))
+    _assign_span_lanes(spans)
+    return spans
+
+
+def _build_combined_constraint_spans_for_axis(
+    path: Path,
+    keys: list[str],
+    path_elements: list[object],
+    *,
+    mapper,
+    sim_index: _SimTimeIndex | None,
+) -> list[TimelineSpan]:
+    spans: list[TimelineSpan] = []
+    for key in keys:
+        spans.extend(
+            _build_constraint_spans_for_axis(
+                path,
+                key,
+                path_elements,
+                mapper=mapper,
+                sim_index=sim_index,
+            )
+        )
+    spans.sort(key=lambda span: (span.start_s_m, span.end_s_m, span.label))
     _assign_span_lanes(spans)
     return spans
 
@@ -1634,10 +1806,11 @@ def _map_projection_distance_to_time(
                     expected_s=source_s,
                 )
             marker.s_m = float(mapped if mapped is not None else mapper(source_s))
-        if row.constraint_key:
-            row.spans = _build_constraint_spans_for_axis(
+        constraint_keys = _constraint_row_keys(row)
+        if constraint_keys:
+            row.spans = _build_combined_constraint_spans_for_axis(
                 path,
-                row.constraint_key,
+                constraint_keys,
                 list(getattr(path, "path_elements", []) or []),
                 mapper=mapper,
                 sim_index=sim_index,
