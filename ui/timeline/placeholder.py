@@ -8,7 +8,7 @@ import math
 import re
 from dataclasses import dataclass, field
 
-from PySide6.QtCore import QEvent, QRectF, QSize, Signal
+from PySide6.QtCore import QEvent, QRectF, QSize, Signal, QTimer
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QFrame,
@@ -852,6 +852,7 @@ class TimelineDock(QFrame):
         return super().eventFilter(watched, event)
 
     def set_path(self, path: Path | None, config: dict[str, object] | None = None) -> None:
+        had_meaningful_projection = float(getattr(self._projection, "total_s_m", 0.0)) > 1e-9
         self._path = path or Path()
         self._config = dict(config or {})
         self._projection = _build_projection(self._path, self._config, use_sim_time=True)
@@ -861,7 +862,10 @@ class TimelineDock(QFrame):
         self._restore_selection()
         self._track_canvas.set_playhead(self._current_time_s, self._is_playing)
         self._sync_canvas_size()
-        self.fit_to_all()
+        if not had_meaningful_projection and self._projection.total_s_m > 1e-9:
+            QTimer.singleShot(0, self.fit_to_all)
+        else:
+            self._ensure_playhead_visible()
 
     def fit_to_all(self) -> None:
         display_s_m = max(self._projection.display_s_m, 0.0)
@@ -1582,6 +1586,17 @@ def _map_projection_distance_to_time(
 
     for row in projection.rows:
         for marker in row.markers:
+            if marker.kind == "start":
+                marker.s_m = 0.0
+                continue
+            if marker.kind == "end":
+                # The end marker represents path completion, not first arrival at
+                # the final XY position. If the robot reaches the last point and
+                # then spends additional time rotating in place, nearest-point
+                # matching can incorrectly snap the end marker to that earlier
+                # arrival time. Pin it to the true simulation duration instead.
+                marker.s_m = float(total_t)
+                continue
             source_s = marker.s_m
             mapped = None
             if (
