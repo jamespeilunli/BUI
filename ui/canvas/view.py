@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QGraphicsLineItem,
     QFrame,
 )
-from PySide6.QtCore import QPointF, QTimer, Signal, QPoint
+from PySide6.QtCore import QPointF, QTimer, Signal, QPoint, QRectF
 from PySide6.QtGui import QPixmap, QTransform, QColor, QPen, QBrush, QPixmapCache
 
 from ui.qt_compat import Qt, QPainter, QGraphicsItem
@@ -76,6 +76,9 @@ def _get_translation_position(element: Any) -> Tuple[float, float]:
 
 
 class CanvasView(QGraphicsView):
+    _NAVIGATION_MARGIN_RATIO = 0.35
+    _NAVIGATION_MIN_MARGIN_M = 0.75
+
     # Signals (mirroring original)
     elementSelected = Signal(int)
     selectionCleared = Signal()
@@ -137,7 +140,7 @@ class CanvasView(QGraphicsView):
         self.graphics_scene = QGraphicsScene(self)
         self.setScene(self.graphics_scene)
         self.graphics_scene.selectionChanged.connect(self._on_scene_selection_changed)
-        self.graphics_scene.setSceneRect(0, 0, FIELD_LENGTH_METERS, FIELD_WIDTH_METERS)
+        self._update_navigation_scene_rect()
         self._field_pixmap_item: Optional[QGraphicsPixmapItem] = None
         self._path: Optional[Path] = None
         self._items: List[Tuple[str, RectElementItem, Optional[RotationHandle]]] = []
@@ -215,6 +218,37 @@ class CanvasView(QGraphicsView):
                 x_offset = 0.0
             self._field_pixmap_item.setPos(x_offset, FIELD_WIDTH_METERS - h_scaled)
         self.graphics_scene.addItem(self._field_pixmap_item)
+
+    def _field_scene_rect(self) -> QRectF:
+        return QRectF(0.0, 0.0, FIELD_LENGTH_METERS, FIELD_WIDTH_METERS)
+
+    def _navigation_scene_rect(self) -> QRectF:
+        field_rect = self._field_scene_rect()
+        margin_x = max(self._NAVIGATION_MIN_MARGIN_M, field_rect.width() * 0.12)
+        margin_y = max(self._NAVIGATION_MIN_MARGIN_M, field_rect.height() * 0.12)
+        try:
+            viewport = self.viewport()
+            if viewport is not None:
+                viewport_rect = viewport.rect()
+                if viewport_rect.width() > 0 and viewport_rect.height() > 0:
+                    viewport_scene_rect = self.mapToScene(viewport_rect).boundingRect()
+                    margin_x = max(
+                        margin_x,
+                        viewport_scene_rect.width() * self._NAVIGATION_MARGIN_RATIO,
+                    )
+                    margin_y = max(
+                        margin_y,
+                        viewport_scene_rect.height() * self._NAVIGATION_MARGIN_RATIO,
+                    )
+        except Exception:
+            pass
+        return field_rect.adjusted(-margin_x, -margin_y, margin_x, margin_y)
+
+    def _update_navigation_scene_rect(self) -> None:
+        try:
+            self.graphics_scene.setSceneRect(self._navigation_scene_rect())
+        except Exception:
+            pass
 
     def set_project_manager(self, project_manager):
         self._project_manager = project_manager
@@ -648,12 +682,14 @@ class CanvasView(QGraphicsView):
             return
         self._is_fitting = True
         try:
-            rect = self.graphics_scene.sceneRect()
+            rect = self._field_scene_rect()
             if rect.width() > 0 and rect.height() > 0:
                 try:
+                    self._update_navigation_scene_rect()
                     self.fitInView(rect, Qt.KeepAspectRatio)
                     if abs(self._zoom_factor - 1.0) > 1e-6:
                         self.scale(self._zoom_factor, self._zoom_factor)
+                    self._update_navigation_scene_rect()
                     if preserve_center is not None:
                         self.centerOn(preserve_center)
                 except Exception:
@@ -1779,6 +1815,7 @@ class CanvasView(QGraphicsView):
             else:
                 self._zoom_factor = new_zoom
             self.scale(factor, factor)
+            self._update_navigation_scene_rect()
             event.accept()
         except Exception:
             try:

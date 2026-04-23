@@ -52,6 +52,15 @@ DEFAULT_ZOOM_PX_PER_M = 72
 ZOOM_SLIDER_MIN = 0
 ZOOM_SLIDER_MAX = 100
 PLAYBACK_STEP_S = SIMULATION_UPDATE_INTERVAL_MS / 1000.0
+TIMELINE_MARKER_SIZE = 11.0
+TIMELINE_MARKER_SELECTION_SIZE = 19.0
+TIMELINE_MARKER_HIT_WIDTH = 20.0
+TIMELINE_MARKER_HIT_HEIGHT = 24.0
+TIMELINE_MARKER_LINE_INSET = 1.5
+TIMELINE_STRUCTURE_TRANSLATION_COLOR = "#3aa3ff"
+TIMELINE_STRUCTURE_WAYPOINT_COLOR = "#ff7f3a"
+TIMELINE_STRUCTURE_ROTATION_COLOR = "#50c878"
+TIMELINE_TRIGGER_COLOR = "#ffd54d"
 
 
 @dataclass
@@ -515,11 +524,14 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def _draw_markers(self, painter: QPainter, row: TimelineRow, track_rect: QRectF) -> None:
         center_y = track_rect.center().y()
         painter.setPen(QPen(QColor("#3b4148"), 1))
-        painter.drawLine(int(track_rect.left()), int(center_y), int(track_rect.right()), int(center_y))
+        painter.drawLine(_qpointf(track_rect.left(), center_y), _qpointf(track_rect.right(), center_y))
 
         last_label_right = -10_000.0
         metrics = painter.fontMetrics()
-        indicator_inset = max(2.0, min(6.0, track_rect.height() * 0.22))
+        indicator_inset = max(
+            1.0,
+            min(TIMELINE_MARKER_LINE_INSET, max(1.0, track_rect.height() * 0.08)),
+        )
         indicator_top = track_rect.top() + indicator_inset
         indicator_bottom = track_rect.bottom() - indicator_inset
 
@@ -528,12 +540,20 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             x = self._x_for_s(marker_s_m)
             color = QColor(marker.color)
             painter.setPen(QPen(color, 1.4))
-            painter.drawLine(int(x), int(indicator_top), int(x), int(indicator_bottom))
+            painter.drawLine(_qpointf(x, indicator_top), _qpointf(x, indicator_bottom))
             if self._is_marker_selected(marker):
                 painter.save()
                 painter.setPen(QPen(QColor("#f5f7fa"), 1.4))
                 painter.setBrush(Qt.NoBrush)
-                painter.drawEllipse(QRectF(x - 9.0, center_y - 9.0, 18.0, 18.0))
+                selection_size = TIMELINE_MARKER_SELECTION_SIZE
+                painter.drawEllipse(
+                    QRectF(
+                        x - (selection_size / 2.0),
+                        center_y - (selection_size / 2.0),
+                        selection_size,
+                        selection_size,
+                    )
+                )
                 painter.restore()
             self._draw_marker_shape(painter, marker.kind, x, center_y, color)
 
@@ -552,31 +572,45 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self, painter: QPainter, kind: str, x: float, center_y: float, color: QColor
     ) -> None:
         painter.save()
-        painter.setPen(QPen(color, 1.2))
-        painter.setBrush(color)
+        outline_color = QColor(color.darker(118))
+        fill_color = QColor(color)
+        half_size = TIMELINE_MARKER_SIZE / 2.0
         if kind == "waypoint":
+            painter.setPen(QPen(outline_color, 1.0))
+            painter.setBrush(fill_color)
             diamond = QPolygonF(
                 [
-                    _qpointf(x, center_y - 7),
-                    _qpointf(x + 7, center_y),
-                    _qpointf(x, center_y + 7),
-                    _qpointf(x - 7, center_y),
+                    _qpointf(x, center_y - half_size),
+                    _qpointf(x + half_size, center_y),
+                    _qpointf(x, center_y + half_size),
+                    _qpointf(x - half_size, center_y),
                 ]
             )
             painter.drawPolygon(diamond)
         elif kind == "rotation":
+            painter.setPen(QPen(outline_color, 1.0))
+            painter.setBrush(fill_color)
+            tip_offset = half_size * 1.1
+            base_offset = tip_offset / 2.0
             tri = QPolygonF(
                 [
-                    _qpointf(x, center_y - 7),
-                    _qpointf(x + 6, center_y + 5),
-                    _qpointf(x - 6, center_y + 5),
+                    _qpointf(x, center_y - tip_offset),
+                    _qpointf(x + half_size, center_y + base_offset),
+                    _qpointf(x - half_size, center_y + base_offset),
                 ]
             )
             painter.drawPolygon(tri)
-        elif kind == "end":
-            painter.drawRect(QRectF(x - 4, center_y - 4, 8, 8))
         else:
-            painter.drawEllipse(QRectF(x - 4.5, center_y - 4.5, 9, 9))
+            painter.setPen(QPen(outline_color, 1.0))
+            painter.setBrush(fill_color)
+            painter.drawEllipse(
+                QRectF(
+                    x - half_size,
+                    center_y - half_size,
+                    TIMELINE_MARKER_SIZE,
+                    TIMELINE_MARKER_SIZE,
+                )
+            )
         painter.restore()
 
     def _draw_spans(self, painter: QPainter, row: TimelineRow, track_rect: QRectF) -> None:
@@ -854,10 +888,11 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                     center_y = track_rect.center().y()
                     for marker in row.markers:
                         marker_rect = QRectF(
-                            self._x_for_s(self._marker_display_s(marker)) - 9.0,
-                            center_y - 11.0,
-                            18.0,
-                            22.0,
+                            self._x_for_s(self._marker_display_s(marker))
+                            - (TIMELINE_MARKER_HIT_WIDTH / 2.0),
+                            center_y - (TIMELINE_MARKER_HIT_HEIGHT / 2.0),
+                            TIMELINE_MARKER_HIT_WIDTH,
+                            TIMELINE_MARKER_HIT_HEIGHT,
                         )
                         if marker_rect.contains(x, y):
                             return ("marker", marker)
@@ -1543,33 +1578,6 @@ def _build_projection(
     translation_count = 0
     waypoint_count = 0
 
-    if anchor_data["anchor_indices"]:
-        first_anchor = path_elements[anchor_data["anchor_indices"][0]]
-        structure_markers.append(
-            TimelineMarker(
-                0.0,
-                "Start",
-                "start",
-                "#5ac878",
-                path_index=anchor_data["anchor_indices"][0],
-                source_x_m=_element_x(first_anchor),
-                source_y_m=_element_y(first_anchor),
-            )
-        )
-        if len(anchor_data["anchor_indices"]) > 1 and total_s_m > 0.0:
-            last_anchor = path_elements[anchor_data["anchor_indices"][-1]]
-            structure_markers.append(
-                TimelineMarker(
-                    total_s_m,
-                    "End",
-                    "end",
-                    "#d96a6a",
-                    path_index=anchor_data["anchor_indices"][-1],
-                    source_x_m=_element_x(last_anchor),
-                    source_y_m=_element_y(last_anchor),
-                )
-            )
-
     for index, element in enumerate(path_elements):
         s_m = _element_global_s(index, element, path_elements, anchor_s_by_path_index)
         if isinstance(element, TranslationTarget):
@@ -1580,7 +1588,7 @@ def _build_projection(
                     s_m,
                     f"T{translation_count}",
                     "translation",
-                    "#60b7ff",
+                    TIMELINE_STRUCTURE_TRANSLATION_COLOR,
                     path_index=index,
                     source_x_m=_element_x(element),
                     source_y_m=_element_y(element),
@@ -1594,7 +1602,7 @@ def _build_projection(
                     s_m,
                     f"W{waypoint_count}",
                     "waypoint",
-                    "#9c8cff",
+                    TIMELINE_STRUCTURE_WAYPOINT_COLOR,
                     path_index=index,
                     source_x_m=_element_x(element),
                     source_y_m=_element_y(element),
@@ -1607,7 +1615,7 @@ def _build_projection(
                     s_m,
                     f"R{rotation_count}",
                     "rotation",
-                    "#ff9c5a",
+                    TIMELINE_STRUCTURE_ROTATION_COLOR,
                     path_index=index,
                 )
             )
@@ -1619,7 +1627,7 @@ def _build_projection(
                     s_m,
                     lib_key or f"E{event_count}",
                     "event",
-                    "#ffd166",
+                    TIMELINE_TRIGGER_COLOR,
                     path_index=index,
                 )
             )
@@ -2074,17 +2082,6 @@ def _map_projection_distance_to_time(
 
     for row in projection.rows:
         for marker in row.markers:
-            if marker.kind == "start":
-                marker.s_m = 0.0
-                continue
-            if marker.kind == "end":
-                # The end marker represents path completion, not first arrival at
-                # the final XY position. If the robot reaches the last point and
-                # then spends additional time rotating in place, nearest-point
-                # matching can incorrectly snap the end marker to that earlier
-                # arrival time. Pin it to the true simulation duration instead.
-                marker.s_m = float(total_t)
-                continue
             source_s = marker.s_m
             mapped = None
             if (
