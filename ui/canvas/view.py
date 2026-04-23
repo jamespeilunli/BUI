@@ -1618,6 +1618,13 @@ class CanvasView(QGraphicsView):
 
     def _rebuild_simulation_now(self):
         try:
+            resume_playback = bool(self._sim_timer.isActive())
+            preserved_time_s = float(getattr(self, "_sim_current_time_s", 0.0) or 0.0)
+            if resume_playback:
+                try:
+                    self._sim_timer.stop()
+                except Exception:
+                    pass
             if self._path is None:
                 self._sim_result = None
                 self._sim_poses_by_time = {}
@@ -1652,7 +1659,10 @@ class CanvasView(QGraphicsView):
             self._sim_poses_by_time = result.poses_by_time
             self._sim_times_sorted = result.times_sorted
             self._sim_total_time_s = float(result.total_time_s)
-            self._sim_current_time_s = 0.0
+            self._sim_current_time_s = max(
+                0.0,
+                min(float(preserved_time_s), float(self._sim_total_time_s)),
+            )
             self._sim_global_s_by_time = {}
             raw_progress = dict(getattr(result, "progress_by_time", {}) or {})
             if raw_progress and self._sim_times_sorted:
@@ -1679,19 +1689,20 @@ class CanvasView(QGraphicsView):
                         self._sim_global_s_by_time[tk] = s_val
                         last_s = s_val
             self._rebuild_protrusion_trigger_schedule()
-            if self._sim_robot_item and self._sim_times_sorted:
-                t0 = self._sim_times_sorted[0]
-                x, y, th = self._sim_poses_by_time.get(t0, (0.0, 0.0, 0.0))
-                self._set_sim_robot_pose(x, y, th)
-                self._update_protrusion_visibility_for_time(0.0, key_hint=t0)
-                self._update_sim_robot_visibility()
-            else:
-                self._set_protrusion_visible(self._default_protrusion_visible())
             if hasattr(result, "trail_points") and result.trail_points:
                 self._setup_trail(result.trail_points)
             else:
                 self._clear_trail()
-            self._emit_playback_state_changed()
+            if self._sim_robot_item and self._sim_times_sorted:
+                self._seek_to_time(self._sim_current_time_s)
+                if resume_playback and self._sim_current_time_s < self._sim_total_time_s:
+                    self._sim_timer.start()
+                    self._update_sim_robot_visibility()
+                    self._emit_playback_state_changed()
+            else:
+                self._set_protrusion_visible(self._default_protrusion_visible())
+                self._update_sim_robot_visibility()
+                self._emit_playback_state_changed()
         except Exception:
             pass
 

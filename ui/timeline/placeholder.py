@@ -45,6 +45,8 @@ ROW_GAP = 8
 MIN_ZOOM_PX_PER_M = 24
 MAX_ZOOM_PX_PER_M = 240
 DEFAULT_ZOOM_PX_PER_M = 72
+ZOOM_SLIDER_MIN = 0
+ZOOM_SLIDER_MAX = 100
 PLAYBACK_STEP_S = SIMULATION_UPDATE_INTERVAL_MS / 1000.0
 
 
@@ -681,6 +683,26 @@ class TimelineDock(QFrame):
         self._setup_ui()
         self.set_path(path or Path(), {})
 
+    @staticmethod
+    def _zoom_value_from_slider(slider_value: int) -> int:
+        clamped = max(ZOOM_SLIDER_MIN, min(ZOOM_SLIDER_MAX, int(slider_value)))
+        alpha = (clamped - ZOOM_SLIDER_MIN) / max(1, ZOOM_SLIDER_MAX - ZOOM_SLIDER_MIN)
+        min_zoom = float(MIN_ZOOM_PX_PER_M)
+        max_zoom = float(MAX_ZOOM_PX_PER_M)
+        zoom = min_zoom * ((max_zoom / min_zoom) ** alpha)
+        return max(MIN_ZOOM_PX_PER_M, min(MAX_ZOOM_PX_PER_M, int(round(zoom))))
+
+    @staticmethod
+    def _slider_value_from_zoom(zoom_value: float) -> int:
+        zoom = max(float(MIN_ZOOM_PX_PER_M), min(float(MAX_ZOOM_PX_PER_M), float(zoom_value)))
+        min_zoom = float(MIN_ZOOM_PX_PER_M)
+        max_zoom = float(MAX_ZOOM_PX_PER_M)
+        if max_zoom <= min_zoom:
+            return ZOOM_SLIDER_MIN
+        alpha = math.log(zoom / min_zoom) / math.log(max_zoom / min_zoom)
+        slider_span = max(1, ZOOM_SLIDER_MAX - ZOOM_SLIDER_MIN)
+        return int(round(ZOOM_SLIDER_MIN + alpha * slider_span))
+
     def _setup_ui(self) -> None:
         self.setObjectName("timelineDock")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -785,8 +807,8 @@ class TimelineDock(QFrame):
         toolbar_layout.addWidget(fit_btn)
 
         self._zoom_slider = QSlider(Qt.Horizontal)
-        self._zoom_slider.setRange(MIN_ZOOM_PX_PER_M, MAX_ZOOM_PX_PER_M)
-        self._zoom_slider.setValue(DEFAULT_ZOOM_PX_PER_M)
+        self._zoom_slider.setRange(ZOOM_SLIDER_MIN, ZOOM_SLIDER_MAX)
+        self._zoom_slider.setValue(self._slider_value_from_zoom(DEFAULT_ZOOM_PX_PER_M))
         self._zoom_slider.setFixedWidth(140)
         self._zoom_slider.valueChanged.connect(self._on_zoom_changed)
         toolbar_layout.addWidget(self._zoom_slider)
@@ -874,7 +896,7 @@ class TimelineDock(QFrame):
         viewport_width = max(1, self._track_scroll.viewport().width() - TRACK_PADDING_X * 2)
         zoom = int(round(viewport_width / display_s_m))
         zoom = max(MIN_ZOOM_PX_PER_M, min(MAX_ZOOM_PX_PER_M, zoom))
-        self._zoom_slider.setValue(zoom)
+        self._zoom_slider.setValue(self._slider_value_from_zoom(zoom))
 
     def _adjust_zoom(self, delta: int) -> None:
         self._zoom_slider.setValue(self._zoom_slider.value() + int(delta))
@@ -901,17 +923,18 @@ class TimelineDock(QFrame):
         self._ensure_playhead_visible()
 
     def _on_zoom_changed(self, value: int) -> None:
+        zoom_px_per_m = self._zoom_value_from_slider(value)
         hbar = self._track_scroll.horizontalScrollBar()
         playhead_x_before = TRACK_PADDING_X + self._current_time_s * float(
             self._track_canvas._zoom_px_per_m
         )
         playhead_offset_in_view = playhead_x_before - float(hbar.value())
 
-        self._zoom_label.setText(f"{int(value)} px/m")
-        self._track_canvas.set_zoom_px_per_m(value)
+        self._zoom_label.setText(f"{int(zoom_px_per_m)} px/s")
+        self._track_canvas.set_zoom_px_per_m(zoom_px_per_m)
         self._sync_canvas_size()
 
-        playhead_x_after = TRACK_PADDING_X + self._current_time_s * float(value)
+        playhead_x_after = TRACK_PADDING_X + self._current_time_s * float(zoom_px_per_m)
         hbar.setValue(int(round(playhead_x_after - playhead_offset_in_view)))
 
     def _sync_canvas_size(self) -> None:
