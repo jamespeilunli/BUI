@@ -94,6 +94,8 @@ class CanvasView(QGraphicsView):
         self.setDragMode(QGraphicsView.NoDrag)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFocusPolicy(Qt.StrongFocus)
         # Subtle rounded corners on the canvas frame
         try:

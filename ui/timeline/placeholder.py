@@ -324,6 +324,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._scrub_moved = False
         self._pressed_on_playhead = False
         self._pressed_hit: tuple[str, object] | None = None
+        self._empty_press_scrubbed = False
         self.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -556,14 +557,17 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             painter.setBrush(fill)
             painter.drawRect(rect)
 
-            text = metrics.elidedText(span.label, Qt.ElideRight, int(max(0.0, width - 10.0)))
-            if text:
+            text_rect = QRectF(rect.left() + 5, rect.top(), rect.width() - 10, rect.height())
+            if span.label and text_rect.width() > 1.0:
+                painter.save()
+                painter.setClipRect(text_rect)
                 painter.setPen(QColor("#f4f7fa"))
                 painter.drawText(
-                    QRectF(rect.left() + 5, rect.top(), rect.width() - 10, rect.height()),
+                    text_rect,
                     Qt.AlignVCenter | Qt.AlignLeft,
-                    text,
+                    span.label,
                 )
+                painter.restore()
 
     def _draw_playhead(self, painter: QPainter) -> None:
         x = self._x_for_s(self._playhead_s_m)
@@ -594,13 +598,14 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             return super().mousePressEvent(event)
         self.setFocus(Qt.MouseFocusReason)
         self._pressed_hit = self._hit_test(event.position().x(), event.position().y())
-        self._scrub_active = bool(
-            self._pressed_hit is None and self._y_in_ruler(float(event.position().y()))
-        )
+        self._empty_press_scrubbed = False
         self._scrub_moved = False
         self._pressed_on_playhead = self._is_playhead_click(event)
-        if self._scrub_active and not self._pressed_on_playhead:
+        self._scrub_active = bool(self._pressed_on_playhead and self._pressed_hit is None)
+        if self._pressed_hit is None and not self._pressed_on_playhead:
+            self.emptyAreaClicked.emit()
             self._emit_scrub_for_event(event)
+            self._empty_press_scrubbed = True
         event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
@@ -614,9 +619,16 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if not self._scrub_active or event.button() != Qt.LeftButton:
             if event.button() == Qt.LeftButton and not self._scrub_moved:
-                self._activate_click_hit(event)
+                if not self._empty_press_scrubbed:
+                    self._activate_click_hit(event)
+                self._pressed_hit = None
+                self._pressed_on_playhead = False
+                self._empty_press_scrubbed = False
                 event.accept()
                 return
+            self._pressed_hit = None
+            self._pressed_on_playhead = False
+            self._empty_press_scrubbed = False
             return super().mouseReleaseEvent(event)
 
         if self._scrub_moved or not self._pressed_on_playhead:
@@ -626,6 +638,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._scrub_moved = False
         self._pressed_on_playhead = False
         self._pressed_hit = None
+        self._empty_press_scrubbed = False
         if should_toggle:
             self.playPauseToggleRequested.emit()
         event.accept()
