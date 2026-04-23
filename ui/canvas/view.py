@@ -43,8 +43,6 @@ from .constants import (
     DEFAULT_ZOOM_FACTOR,
     MIN_ZOOM_FACTOR,
     MAX_ZOOM_FACTOR,
-    ZOOM_EXP_BASE_SENSITIVITY,
-    ZOOM_EXP_MAX_SENSITIVITY,
     SIMULATION_UPDATE_INTERVAL_MS,
     SIMULATION_DEBOUNCE_INTERVAL_MS,
     SELECTION_PULSE_INTERVAL_MS,
@@ -79,6 +77,9 @@ def _get_translation_position(element: Any) -> Tuple[float, float]:
 class CanvasView(QGraphicsView):
     _NAVIGATION_MARGIN_RATIO = 0.35
     _NAVIGATION_MIN_MARGIN_M = 0.75
+    _NAVIGATION_EXTRA_MARGIN_X_M = FIELD_LENGTH_METERS * 2.5
+    _NAVIGATION_EXTRA_MARGIN_Y_M = FIELD_WIDTH_METERS * 2.5
+    _WHEEL_ZOOM_BASE = 1.125
 
     # Signals (mirroring original)
     elementSelected = Signal(int)
@@ -96,8 +97,8 @@ class CanvasView(QGraphicsView):
         self.setRenderHint(QPainter.Antialiasing, True)
         self.setViewportUpdateMode(QGraphicsView.BoundingRectViewportUpdate)
         self.setDragMode(QGraphicsView.NoDrag)
-        self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
-        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.NoAnchor)
+        self.setTransformationAnchor(QGraphicsView.NoAnchor)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -120,9 +121,14 @@ class CanvasView(QGraphicsView):
         self._suppress_live_events = False
         self._rotation_t_cache: Optional[dict[int, float]] = None
         self._anchor_drag_in_progress = False
+        self._base_view_scale = 1.0
         self._zoom_factor = DEFAULT_ZOOM_FACTOR
         self._min_zoom = MIN_ZOOM_FACTOR
         self._max_zoom = MAX_ZOOM_FACTOR
+        self._view_center = QPointF(
+            FIELD_LENGTH_METERS * 0.5,
+            FIELD_WIDTH_METERS * 0.5,
+        )
         self._is_panning = False
         self._pan_start: Optional[QPoint] = None
         self.robot_length_m = ELEMENT_RECT_WIDTH_M
@@ -225,24 +231,8 @@ class CanvasView(QGraphicsView):
 
     def _navigation_scene_rect(self) -> QRectF:
         field_rect = self._field_scene_rect()
-        margin_x = max(self._NAVIGATION_MIN_MARGIN_M, field_rect.width() * 0.12)
-        margin_y = max(self._NAVIGATION_MIN_MARGIN_M, field_rect.height() * 0.12)
-        try:
-            viewport = self.viewport()
-            if viewport is not None:
-                viewport_rect = viewport.rect()
-                if viewport_rect.width() > 0 and viewport_rect.height() > 0:
-                    viewport_scene_rect = self.mapToScene(viewport_rect).boundingRect()
-                    margin_x = max(
-                        margin_x,
-                        viewport_scene_rect.width() * self._NAVIGATION_MARGIN_RATIO,
-                    )
-                    margin_y = max(
-                        margin_y,
-                        viewport_scene_rect.height() * self._NAVIGATION_MARGIN_RATIO,
-                    )
-        except Exception:
-            pass
+        margin_x = max(self._NAVIGATION_MIN_MARGIN_M, self._NAVIGATION_EXTRA_MARGIN_X_M)
+        margin_y = max(self._NAVIGATION_MIN_MARGIN_M, self._NAVIGATION_EXTRA_MARGIN_Y_M)
         return field_rect.adjusted(-margin_x, -margin_y, margin_x, margin_y)
 
     def _update_navigation_scene_rect(self) -> None:
@@ -650,23 +640,193 @@ class CanvasView(QGraphicsView):
     def _safe_center_on(self, item: QGraphicsItem):
         try:
             if item and item.scene():
-                self.centerOn(item)
+                self._apply_view_transform(preserve_center=item.sceneBoundingRect().center())
         except Exception:
             pass
 
     def _scene_viewport_center(self) -> QPointF:
         try:
+            return QPointF(float(self._view_center.x()), float(self._view_center.y()))
+        except Exception:
+            pass
+        try:
+            return self._field_scene_rect().center()
+        except Exception:
+            return QPointF()
+
+    def _viewport_center_point(self) -> QPointF:
+        try:
+            viewport = self.viewport()
+            if viewport is not None:
+                viewport_rect = viewport.rect()
+                return QPointF(
+                    float(viewport_rect.width()) * 0.5,
+                    float(viewport_rect.height()) * 0.5,
+                )
+        except Exception:
+            pass
+        return QPointF()
+
+    def _scene_pos_from_view(self, view_pos) -> QPointF:
+        try:
+            view_x = float(view_pos.x())
+            view_y = float(view_pos.y())
+        except Exception:
+            return QPointF()
+        try:
+            view_scale = self._view_scale()
+            viewport_center = self._viewport_center_point()
+            return QPointF(
+                float(self._view_center.x()) + ((view_x - float(viewport_center.x())) / view_scale),
+                float(self._view_center.y()) + ((view_y - float(viewport_center.y())) / view_scale),
+            )
+        except Exception:
+            return QPointF()
+
+    def _view_pos_from_scene(self, scene_pos: QPointF) -> QPointF:
+        try:
+            view_scale = self._view_scale()
+            viewport_center = self._viewport_center_point()
+            return QPointF(
+                (float(scene_pos.x()) - float(self._view_center.x())) * view_scale
+                + float(viewport_center.x()),
+                (float(scene_pos.y()) - float(self._view_center.y())) * view_scale
+                + float(viewport_center.y()),
+            )
+        except Exception:
+            return QPointF()
+
+    def _clamp_view_center(self, center: QPointF) -> QPointF:
+        try:
+            nav_rect = self._navigation_scene_rect()
+            view_scale = self._view_scale()
+            viewport_center = self._viewport_center_point()
+            half_w = float(viewport_center.x()) / view_scale
+            half_h = float(viewport_center.y()) / view_scale
+            min_x = float(nav_rect.left()) + half_w
+            max_x = float(nav_rect.right()) - half_w
+            min_y = float(nav_rect.top()) + half_h
+            max_y = float(nav_rect.bottom()) - half_h
+            if min_x > max_x:
+                target_x = float(nav_rect.center().x())
+            else:
+                target_x = max(min_x, min(float(center.x()), max_x))
+            if min_y > max_y:
+                target_y = float(nav_rect.center().y())
+            else:
+                target_y = max(min_y, min(float(center.y()), max_y))
+            return QPointF(target_x, target_y)
+        except Exception:
+            return center
+
+    def _fit_scale_for_viewport(self) -> float:
+        rect = self._field_scene_rect()
+        if rect.width() <= 0.0 or rect.height() <= 0.0:
+            return 1.0
+        try:
             viewport = self.viewport()
             if viewport is not None:
                 viewport_rect = viewport.rect()
                 if viewport_rect.width() > 0 and viewport_rect.height() > 0:
-                    return self.mapToScene(viewport_rect.center())
+                    return min(
+                        float(viewport_rect.width()) / float(rect.width()),
+                        float(viewport_rect.height()) / float(rect.height()),
+                    )
+        except Exception:
+            pass
+        return 1.0
+
+    def _view_scale(self, zoom_factor: Optional[float] = None) -> float:
+        zoom = float(self._zoom_factor if zoom_factor is None else zoom_factor)
+        return max(1e-9, float(self._base_view_scale) * zoom)
+
+    def _apply_view_transform(
+        self,
+        *,
+        preserve_center: Optional[QPointF] = None,
+        anchor_scene_pos: Optional[QPointF] = None,
+        anchor_viewport_pos: Optional[QPointF] = None,
+    ) -> None:
+        view_scale = self._view_scale()
+        target_center = preserve_center
+        if anchor_scene_pos is not None and anchor_viewport_pos is not None:
+            viewport_center = self._viewport_center_point()
+            target_center = QPointF(
+                float(anchor_scene_pos.x())
+                - ((float(anchor_viewport_pos.x()) - float(viewport_center.x())) / view_scale),
+                float(anchor_scene_pos.y())
+                - ((float(anchor_viewport_pos.y()) - float(viewport_center.y())) / view_scale),
+            )
+        if target_center is None:
+            target_center = self._field_scene_rect().center()
+        self._view_center = self._clamp_view_center(target_center)
+        viewport_center = self._viewport_center_point()
+        transform = QTransform()
+        transform.translate(float(viewport_center.x()), float(viewport_center.y()))
+        transform.scale(view_scale, view_scale)
+        transform.translate(-float(self._view_center.x()), -float(self._view_center.y()))
+        try:
+            self.horizontalScrollBar().setValue(0)
+            self.verticalScrollBar().setValue(0)
+        except Exception:
+            pass
+        self.setTransform(transform, False)
+        try:
+            self.horizontalScrollBar().setValue(0)
+            self.verticalScrollBar().setValue(0)
+        except Exception:
+            pass
+
+    def _set_zoom_factor(
+        self,
+        zoom_factor: float,
+        *,
+        anchor_viewport_pos: Optional[QPointF] = None,
+        anchor_scene_pos: Optional[QPointF] = None,
+    ) -> bool:
+        clamped_zoom = max(float(self._min_zoom), min(float(self._max_zoom), float(zoom_factor)))
+        if abs(clamped_zoom - float(self._zoom_factor)) <= 1e-9:
+            return False
+        self._zoom_factor = clamped_zoom
+        self._update_navigation_scene_rect()
+        self._apply_view_transform(
+            anchor_scene_pos=anchor_scene_pos,
+            anchor_viewport_pos=anchor_viewport_pos,
+        )
+        return True
+
+    def _pan_by_view_delta(self, delta_x: float, delta_y: float) -> bool:
+        if abs(delta_x) <= 1e-6 and abs(delta_y) <= 1e-6:
+            return False
+        view_scale = self._view_scale()
+        target_center = QPointF(
+            float(self._view_center.x()) - (float(delta_x) / view_scale),
+            float(self._view_center.y()) - (float(delta_y) / view_scale),
+        )
+        self._apply_view_transform(preserve_center=target_center)
+        return True
+
+    def _zoom_anchor_from_event(self, event) -> QPointF:
+        try:
+            return QPointF(float(event.position().x()), float(event.position().y()))
         except Exception:
             pass
         try:
-            return self.graphics_scene.sceneRect().center()
+            pos = event.pos()
+            return QPointF(float(pos.x()), float(pos.y()))
         except Exception:
-            return QPointF()
+            return self._viewport_center_point()
+
+    def _zoom_from_steps(self, steps: float, anchor_viewport_pos: QPointF) -> bool:
+        if abs(steps) <= 1e-9:
+            return False
+        anchor_scene_pos = self._scene_pos_from_view(anchor_viewport_pos)
+        target_zoom = float(self._zoom_factor) * (self._WHEEL_ZOOM_BASE**float(steps))
+        return self._set_zoom_factor(
+            target_zoom,
+            anchor_viewport_pos=anchor_viewport_pos,
+            anchor_scene_pos=anchor_scene_pos,
+        )
 
     # ------------- Resize / Show -------------
     def resizeEvent(self, event):
@@ -686,13 +846,11 @@ class CanvasView(QGraphicsView):
             rect = self._field_scene_rect()
             if rect.width() > 0 and rect.height() > 0:
                 try:
+                    self._base_view_scale = self._fit_scale_for_viewport()
                     self._update_navigation_scene_rect()
-                    self.fitInView(rect, Qt.KeepAspectRatio)
-                    if abs(self._zoom_factor - 1.0) > 1e-6:
-                        self.scale(self._zoom_factor, self._zoom_factor)
-                    self._update_navigation_scene_rect()
-                    if preserve_center is not None:
-                        self.centerOn(preserve_center)
+                    self._apply_view_transform(
+                        preserve_center=preserve_center if preserve_center is not None else rect.center()
+                    )
                 except Exception:
                     pass
         finally:
@@ -1800,40 +1958,32 @@ class CanvasView(QGraphicsView):
 
     def wheelEvent(self, event):
         try:
-            delta_y = 0
-            delta = event.angleDelta()
-            if delta:
-                delta_y = int(delta.y())
-            if delta_y == 0:
-                pdelta = event.pixelDelta()
-                if pdelta:
-                    delta_y = int(pdelta.y())
-            if delta_y == 0:
-                return super().wheelEvent(event)
-            zoom_steps = float(delta_y) / 120.0
-            zoom_progress = self._zoom_progress()
-            step_sensitivity = (
-                float(ZOOM_EXP_BASE_SENSITIVITY)
-                + (
-                    float(ZOOM_EXP_MAX_SENSITIVITY) - float(ZOOM_EXP_BASE_SENSITIVITY)
-                )
-                * (zoom_progress**1.35)
-            )
-            factor = math.exp(zoom_steps * step_sensitivity)
-            new_zoom = self._zoom_factor * factor
-            clamped_zoom = max(float(self._min_zoom), min(float(self._max_zoom), new_zoom))
-            if abs(clamped_zoom - self._zoom_factor) <= 1e-9:
-                return
-            factor = clamped_zoom / self._zoom_factor
-            self._zoom_factor = clamped_zoom
-            self.scale(factor, factor)
-            self._update_navigation_scene_rect()
-            event.accept()
-        except Exception:
+            delta_y = 0.0
             try:
-                super().wheelEvent(event)
+                delta_y = float(event.angleDelta().y())
             except Exception:
-                pass
+                delta_y = 0.0
+            if abs(delta_y) <= 1e-6:
+                try:
+                    delta_y = float(event.pixelDelta().y())
+                except Exception:
+                    delta_y = 0.0
+            if abs(delta_y) > 1e-6:
+                self._zoom_from_steps(
+                    delta_y / 120.0,
+                    self._zoom_anchor_from_event(event),
+                )
+                event.accept()
+                return
+            else:
+                event.accept()
+                return
+        except Exception:
+            pass
+        try:
+            super().wheelEvent(event)
+        except Exception:
+            pass
 
     def _on_rotation_handle_released(self, index: int):
         try:
@@ -1886,10 +2036,7 @@ class CanvasView(QGraphicsView):
         try:
             if self._is_panning and self._pan_start is not None:
                 delta = event.pos() - self._pan_start
-                hbar = self.horizontalScrollBar()
-                vbar = self.verticalScrollBar()
-                hbar.setValue(hbar.value() - delta.x())
-                vbar.setValue(vbar.value() - delta.y())
+                self._pan_by_view_delta(float(delta.x()), float(delta.y()))
                 self._pan_start = event.pos()
                 event.accept()
                 return
