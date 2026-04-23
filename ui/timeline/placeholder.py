@@ -35,16 +35,16 @@ from ui.sidebar.utils import RANGED_CONSTRAINT_KEYS, SPINNER_METADATA, SPINNER_U
 from ui.sidebar.utils.ranged_constraint_ui import get_constraint_domain_elements
 
 
-HEADER_WIDTH = 156
-TRACK_PADDING_X = 16
-TOP_PADDING = 14
-BOTTOM_PADDING = 16
-RULER_HEIGHT = 28
-ROW_HEIGHT = 42
-ROW_GAP = 8
-MIN_ROW_HEIGHT = 28
-MIN_SPAN_ROW_HEIGHT = 24
-MIN_LANE_HEIGHT = 6
+HEADER_WIDTH = 144
+TRACK_PADDING_X = 12
+TOP_PADDING = 8
+BOTTOM_PADDING = 8
+RULER_HEIGHT = 22
+ROW_HEIGHT = 34
+ROW_GAP = 4
+MIN_ROW_HEIGHT = 22
+MIN_SPAN_ROW_HEIGHT = 18
+MIN_LANE_HEIGHT = 5
 MIN_LANE_GAP = 2
 MIN_ZOOM_PX_PER_M = 24
 MAX_ZOOM_PX_PER_M = 1200
@@ -120,7 +120,7 @@ def _row_height_for(row: TimelineRow) -> int:
         return ROW_HEIGHT
     lanes = max(1, int(row.lane_count))
     # Keep single-lane rows compact, but expand for stacked overlaps.
-    return max(ROW_HEIGHT, 14 + lanes * 18 + max(0, lanes - 1) * 4)
+    return max(ROW_HEIGHT, 10 + lanes * 16 + max(0, lanes - 1) * 3)
 
 
 def _rows_total_height(rows: list[TimelineRow]) -> int:
@@ -133,7 +133,7 @@ def _row_min_height_for(row: TimelineRow) -> int:
     if not row.spans:
         return MIN_ROW_HEIGHT
     lanes = max(1, int(row.lane_count))
-    return max(MIN_SPAN_ROW_HEIGHT, 8 + lanes * MIN_LANE_HEIGHT + max(0, lanes - 1) * MIN_LANE_GAP)
+    return max(MIN_SPAN_ROW_HEIGHT, 6 + lanes * MIN_LANE_HEIGHT + max(0, lanes - 1) * MIN_LANE_GAP)
 
 
 def _constraint_row_keys(row: TimelineRow) -> list[str]:
@@ -235,7 +235,7 @@ class _TimelineCanvasBase(QWidget):
         super().__init__(parent)
         self._projection = TimelineProjection(0.0, 6.0, "", [])
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setMinimumHeight(220)
+        self.setMinimumHeight(180)
 
     def set_projection(self, projection: TimelineProjection) -> None:
         self._projection = projection
@@ -362,7 +362,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         return self._track_left() + s_m * self._zoom_px_per_m
 
     def _track_rect_for_row(self, row_top: int, row_height: int) -> QRectF:
-        vertical_padding = max(0.5, min(7.0, float(row_height) * 0.16))
+        vertical_padding = max(0.5, min(5.0, float(row_height) * 0.12))
         return QRectF(
             self._track_left(),
             row_top + vertical_padding,
@@ -373,7 +373,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def _lane_metrics(self, row: TimelineRow, track_rect: QRectF) -> tuple[int, float, float, float]:
         lane_count = max(1, int(row.lane_count))
         available_h = max(1.0, track_rect.height())
-        lane_gap = 4.0
+        lane_gap = 3.0
         if lane_count > 1:
             max_gap = (available_h - lane_count) / max(1, lane_count - 1)
             lane_gap = max(0.0, min(lane_gap, max_gap))
@@ -394,8 +394,8 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
 
         step_m = _nice_ruler_step(self._zoom_px_per_m)
         metrics = painter.fontMetrics()
-        label_y = top + 17
-        tick_top = bottom - 10
+        label_y = top + 14
+        tick_top = bottom - 8
         tick_bottom = bottom - 1
 
         tick = 0.0
@@ -454,12 +454,15 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
 
         last_label_right = -10_000.0
         metrics = painter.fontMetrics()
+        indicator_inset = max(2.0, min(6.0, track_rect.height() * 0.22))
+        indicator_top = track_rect.top() + indicator_inset
+        indicator_bottom = track_rect.bottom() - indicator_inset
 
         for marker in row.markers:
             x = self._x_for_s(marker.s_m)
             color = QColor(marker.color)
             painter.setPen(QPen(color, 1.4))
-            painter.drawLine(int(x), int(track_rect.top()), int(x), int(track_rect.bottom()))
+            painter.drawLine(int(x), int(indicator_top), int(x), int(indicator_bottom))
             if self._is_marker_selected(marker):
                 painter.save()
                 painter.setPen(QPen(QColor("#f5f7fa"), 1.4))
@@ -476,7 +479,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             if label_x <= last_label_right + 8:
                 continue
             painter.setPen(QColor("#cfd6de"))
-            painter.drawText(int(label_x), int(track_rect.top()) + 11, label)
+            painter.drawText(int(label_x), int(track_rect.top()) + 10, label)
             last_label_right = label_x + label_width
 
     def _draw_marker_shape(
@@ -488,10 +491,10 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         if kind == "waypoint":
             diamond = QPolygonF(
                 [
-                    _qpointf(x, center_y - 6),
-                    _qpointf(x + 6, center_y),
-                    _qpointf(x, center_y + 6),
-                    _qpointf(x - 6, center_y),
+                    _qpointf(x, center_y - 7),
+                    _qpointf(x + 7, center_y),
+                    _qpointf(x, center_y + 7),
+                    _qpointf(x - 7, center_y),
                 ]
             )
             painter.drawPolygon(diamond)
@@ -818,7 +821,7 @@ class TimelineDock(QFrame):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFrameShape(QFrame.NoFrame)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.setMinimumHeight(220)
+        self.setMinimumHeight(180)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setStyleSheet(
             """
@@ -832,7 +835,7 @@ class TimelineDock(QFrame):
             }
             QLabel#timelineToolbarTitle {
                 color: #f0f0f0;
-                font-size: 14px;
+                font-size: 13px;
                 font-weight: 600;
             }
             QLabel#timelineToolbarMeta {
@@ -844,7 +847,7 @@ class TimelineDock(QFrame):
                 color: #e9eef3;
                 border: 1px solid #393939;
                 border-radius: 4px;
-                padding: 4px 10px;
+                padding: 2px 8px;
             }
             QPushButton[timelineControl='true']:hover {
                 background: #313131;
@@ -879,8 +882,8 @@ class TimelineDock(QFrame):
         toolbar = QWidget()
         toolbar.setObjectName("timelineToolbar")
         toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(14, 10, 14, 10)
-        toolbar_layout.setSpacing(10)
+        toolbar_layout.setContentsMargins(10, 6, 10, 6)
+        toolbar_layout.setSpacing(8)
 
         title = QLabel("Timeline")
         title.setObjectName("timelineToolbarTitle")
@@ -919,7 +922,7 @@ class TimelineDock(QFrame):
         self._zoom_slider = QSlider(Qt.Horizontal)
         self._zoom_slider.setRange(ZOOM_SLIDER_MIN, ZOOM_SLIDER_MAX)
         self._zoom_slider.setValue(self._slider_value_from_zoom(DEFAULT_ZOOM_PX_PER_M))
-        self._zoom_slider.setFixedWidth(140)
+        self._zoom_slider.setFixedWidth(124)
         self._zoom_slider.valueChanged.connect(self._on_zoom_changed)
         toolbar_layout.addWidget(self._zoom_slider)
 

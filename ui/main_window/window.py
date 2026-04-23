@@ -49,7 +49,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
         super().__init__()  # Call parent init
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setWindowTitle("")
-        self.resize(1000, 600)
+        self.resize(1000, 760)
 
         # Enable unified title and toolbar on macOS for centered title
         try:
@@ -329,7 +329,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
         """Apply Phase 1 default proportions after the window has geometry."""
         try:
             total_width = max(self.centralWidget().width(), 1000)
-            total_height = max(self.centralWidget().height(), 600)
+            total_height = max(self.centralWidget().height(), 760)
             sidebar_width = max(280, min(340, int(total_width * 0.24)))
             left_width = max(520, total_width - sidebar_width)
             timeline_height = max(180, int(total_height * 0.32))
