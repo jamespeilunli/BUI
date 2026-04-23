@@ -1233,6 +1233,8 @@ class TimelineDock(QFrame):
 
     def set_path(self, path: Path | None, config: dict[str, object] | None = None) -> None:
         had_meaningful_projection = float(getattr(self._projection, "total_s_m", 0.0)) > 1e-9
+        preserved_hbar = int(self._track_scroll.horizontalScrollBar().value())
+        preserved_vbar = int(self._track_scroll.verticalScrollBar().value())
         self._path = path or Path()
         self._config = dict(config or {})
         self._projection = _build_projection(self._path, self._config, use_sim_time=True)
@@ -1242,11 +1244,11 @@ class TimelineDock(QFrame):
         self._restore_selection()
         self._track_canvas.set_playhead(self._current_time_s, self._is_playing)
         self._sync_canvas_size()
-        self._update_minimum_zoom(enforce_current=had_meaningful_projection)
+        self._update_minimum_zoom(enforce_current=False)
         if not had_meaningful_projection and self._projection.total_s_m > 1e-9:
             QTimer.singleShot(0, self.fit_to_all)
         else:
-            self._ensure_playhead_visible()
+            self._restore_scroll_state(preserved_hbar, preserved_vbar)
 
     def fit_to_all(self) -> None:
         self._set_zoom_px_per_m(self._fit_zoom_px_per_m())
@@ -1300,7 +1302,8 @@ class TimelineDock(QFrame):
         self._playback_label.setText(
             f"{state_text} at {self._current_time_s:.2f} / {self._total_time_s:.2f} s"
         )
-        self._ensure_playhead_visible()
+        if self._is_playing:
+            self._ensure_playhead_visible()
 
     def _on_zoom_changed(self, value: int) -> None:
         zoom_px_per_m = self._zoom_value_from_slider(value)
@@ -1369,6 +1372,8 @@ class TimelineDock(QFrame):
 
     def _update_minimum_zoom(self, *, enforce_current: bool) -> None:
         new_min_zoom = self._fit_zoom_px_per_m()
+        if not enforce_current:
+            new_min_zoom = min(new_min_zoom, int(self._track_canvas._zoom_px_per_m))
         if new_min_zoom == int(self._minimum_zoom_px_per_m):
             if enforce_current and self._track_canvas._zoom_px_per_m < new_min_zoom:
                 self._set_zoom_px_per_m(new_min_zoom)
@@ -1404,6 +1409,12 @@ class TimelineDock(QFrame):
             self._track_scroll.verticalScrollBar().maximum(),
         )
         self._rail_scroll.verticalScrollBar().setValue(self._track_scroll.verticalScrollBar().value())
+
+    def _restore_scroll_state(self, hbar_value: int, vbar_value: int) -> None:
+        hbar = self._track_scroll.horizontalScrollBar()
+        vbar = self._track_scroll.verticalScrollBar()
+        hbar.setValue(max(hbar.minimum(), min(hbar.maximum(), int(hbar_value))))
+        vbar.setValue(max(vbar.minimum(), min(vbar.maximum(), int(vbar_value))))
 
     def _on_scrub_requested(self, time_s: float) -> None:
         self.scrubRequested.emit(float(time_s))

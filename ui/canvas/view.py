@@ -43,7 +43,8 @@ from .constants import (
     DEFAULT_ZOOM_FACTOR,
     MIN_ZOOM_FACTOR,
     MAX_ZOOM_FACTOR,
-    ZOOM_STEP_FACTOR,
+    ZOOM_EXP_BASE_SENSITIVITY,
+    ZOOM_EXP_MAX_SENSITIVITY,
     SIMULATION_UPDATE_INTERVAL_MS,
     SIMULATION_DEBOUNCE_INTERVAL_MS,
     SELECTION_PULSE_INTERVAL_MS,
@@ -696,6 +697,16 @@ class CanvasView(QGraphicsView):
                     pass
         finally:
             self._is_fitting = False
+
+    def _zoom_progress(self, zoom_factor: Optional[float] = None) -> float:
+        zoom = float(self._zoom_factor if zoom_factor is None else zoom_factor)
+        min_zoom = max(1e-9, float(self._min_zoom))
+        max_zoom = max(min_zoom + 1e-9, float(self._max_zoom))
+        try:
+            progress = math.log(zoom / min_zoom) / math.log(max_zoom / min_zoom)
+        except Exception:
+            return 0.0
+        return max(0.0, min(1.0, progress))
 
     # ------------- Item build -------------
     def _clear_scene_items(self):
@@ -1799,21 +1810,22 @@ class CanvasView(QGraphicsView):
                     delta_y = int(pdelta.y())
             if delta_y == 0:
                 return super().wheelEvent(event)
-            zoom_step = ZOOM_STEP_FACTOR
-            factor = zoom_step if delta_y > 0 else (1.0 / zoom_step)
+            zoom_steps = float(delta_y) / 120.0
+            zoom_progress = self._zoom_progress()
+            step_sensitivity = (
+                float(ZOOM_EXP_BASE_SENSITIVITY)
+                + (
+                    float(ZOOM_EXP_MAX_SENSITIVITY) - float(ZOOM_EXP_BASE_SENSITIVITY)
+                )
+                * (zoom_progress**1.35)
+            )
+            factor = math.exp(zoom_steps * step_sensitivity)
             new_zoom = self._zoom_factor * factor
-            if new_zoom < self._min_zoom:
-                if self._zoom_factor <= self._min_zoom:
-                    return
-                factor = self._min_zoom / self._zoom_factor
-                self._zoom_factor = self._min_zoom
-            elif new_zoom > self._max_zoom:
-                if self._zoom_factor >= self._max_zoom:
-                    return
-                factor = self._max_zoom / self._zoom_factor
-                self._zoom_factor = self._max_zoom
-            else:
-                self._zoom_factor = new_zoom
+            clamped_zoom = max(float(self._min_zoom), min(float(self._max_zoom), new_zoom))
+            if abs(clamped_zoom - self._zoom_factor) <= 1e-9:
+                return
+            factor = clamped_zoom / self._zoom_factor
+            self._zoom_factor = clamped_zoom
             self.scale(factor, factor)
             self._update_navigation_scene_rect()
             event.accept()
