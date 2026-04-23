@@ -115,6 +115,12 @@ class _SimTimeIndex:
     sample_y: list[float]
 
 
+@dataclass
+class TriggerPlacement:
+    insert_index: int
+    t_ratio: float
+
+
 def _row_height_for(row: TimelineRow) -> int:
     if not row.spans:
         return ROW_HEIGHT
@@ -278,9 +284,16 @@ class _TimelineCanvasBase(QWidget):
 
 
 class _TimelineRailCanvas(_TimelineCanvasBase):
+    triggerAddClicked = Signal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.MinimumExpanding)
+        self._trigger_add_armed = False
+
+    def set_trigger_add_armed(self, armed: bool) -> None:
+        self._trigger_add_armed = bool(armed)
+        self.update()
 
     def _draw_ruler(self, painter: QPainter) -> None:
         top = TOP_PADDING
@@ -303,6 +316,42 @@ class _TimelineRailCanvas(_TimelineCanvasBase):
         fm = painter.fontMetrics()
         text_y = int(y + (row_height + fm.ascent() - fm.descent()) / 2.0)
         painter.drawText(14, text_y, row.title)
+        if row.title == "Triggers":
+            self._draw_trigger_add_button(painter, y, row_height)
+
+    def _draw_trigger_add_button(self, painter: QPainter, y: int, row_height: int) -> None:
+        rect = self._trigger_add_button_rect(y, row_height)
+        fill = QColor("#2f6f52") if self._trigger_add_armed else QColor("#23272c")
+        border = QColor("#6bd39a") if self._trigger_add_armed else QColor("#3a4047")
+        text = QColor("#eef4f8") if self._trigger_add_armed else QColor("#d7dde4")
+        painter.save()
+        painter.setPen(QPen(border, 1))
+        painter.setBrush(fill)
+        painter.drawRoundedRect(rect, 4.0, 4.0)
+        painter.setPen(text)
+        fm = painter.fontMetrics()
+        plus = "+"
+        text_x = rect.center().x() - (fm.horizontalAdvance(plus) / 2.0)
+        text_y = rect.center().y() + ((fm.ascent() - fm.descent()) / 2.0)
+        painter.drawText(int(text_x), int(text_y), plus)
+        painter.restore()
+
+    def _trigger_add_button_rect(self, y: int, row_height: int) -> QRectF:
+        button_size = min(18.0, max(14.0, float(row_height) - 10.0))
+        x = HEADER_WIDTH - button_size - 10.0
+        y_pos = y + max(2.0, (float(row_height) - button_size) / 2.0)
+        return QRectF(x, y_pos, button_size, button_size)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            for row, (row_top, row_h) in zip(self._projection.rows, self._row_layout()):
+                if row.title != "Triggers":
+                    continue
+                if self._trigger_add_button_rect(row_top, row_h).contains(event.position()):
+                    self.triggerAddClicked.emit()
+                    event.accept()
+                    return
+        super().mousePressEvent(event)
 
 
 class _TimelineTrackCanvas(_TimelineCanvasBase):
@@ -313,6 +362,9 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     pathItemClicked = Signal(int)
     constraintSpanClicked = Signal(str, int, int)
     emptyAreaClicked = Signal()
+    eventTriggerCreateRequested = Signal(float)
+    eventTriggerMoveRequested = Signal(int, float)
+    deleteSelectionRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -325,9 +377,21 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._pressed_on_playhead = False
         self._pressed_hit: tuple[str, object] | None = None
         self._empty_press_scrubbed = False
+        self._pressed_event_marker: TimelineMarker | None = None
+        self._pressed_event_marker_origin_s_m = 0.0
+        self._pressed_event_marker_drag_s_m = 0.0
+        self._pressed_event_marker_drag_active = False
+        self._pressed_event_marker_press_pos: tuple[float, float] | None = None
+        self._trigger_add_armed = False
+        self._trigger_add_press_consumed = False
         self.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
+
+    def set_trigger_add_armed(self, armed: bool) -> None:
+        self._trigger_add_armed = bool(armed)
+        self._update_trigger_add_cursor()
+        self.update()
 
     def set_zoom_px_per_m(self, zoom_px_per_m: int) -> None:
         self._zoom_px_per_m = max(MIN_ZOOM_PX_PER_M, min(MAX_ZOOM_PX_PER_M, int(zoom_px_per_m)))
@@ -460,7 +524,8 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         indicator_bottom = track_rect.bottom() - indicator_inset
 
         for marker in row.markers:
-            x = self._x_for_s(marker.s_m)
+            marker_s_m = self._marker_display_s(marker)
+            x = self._x_for_s(marker_s_m)
             color = QColor(marker.color)
             painter.setPen(QPen(color, 1.4))
             painter.drawLine(int(x), int(indicator_top), int(x), int(indicator_bottom))
@@ -598,9 +663,36 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             return super().mousePressEvent(event)
         self.setFocus(Qt.MouseFocusReason)
         self._pressed_hit = self._hit_test(event.position().x(), event.position().y())
+        self._pressed_event_marker = None
+        self._pressed_event_marker_press_pos = None
+        self._pressed_event_marker_drag_active = False
         self._empty_press_scrubbed = False
         self._scrub_moved = False
+        self._trigger_add_press_consumed = False
         self._pressed_on_playhead = self._is_playhead_click(event)
+        pressed_row = self._row_at_y(float(event.position().y()))
+        if self._trigger_add_armed and pressed_row is not None and pressed_row.title == "Triggers":
+            self.eventTriggerCreateRequested.emit(self._s_for_x(float(event.position().x())))
+            self._trigger_add_press_consumed = True
+            event.accept()
+            return
+        if self._pressed_hit is not None:
+            hit_kind, payload = self._pressed_hit
+            if (
+                hit_kind == "marker"
+                and isinstance(payload, TimelineMarker)
+                and payload.kind == "event"
+                and payload.path_index is not None
+            ):
+                self._pressed_event_marker = payload
+                self._pressed_event_marker_origin_s_m = float(payload.s_m)
+                self._pressed_event_marker_drag_s_m = float(payload.s_m)
+                self._pressed_event_marker_press_pos = (
+                    float(event.position().x()),
+                    float(event.position().y()),
+                )
+                event.accept()
+                return
         self._scrub_active = bool(self._pressed_on_playhead and self._pressed_hit is None)
         if self._pressed_hit is None and not self._pressed_on_playhead:
             self.emptyAreaClicked.emit()
@@ -609,6 +701,22 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        self._update_trigger_add_cursor(float(event.position().y()))
+        if self._trigger_add_press_consumed:
+            event.accept()
+            return
+        if self._pressed_event_marker is not None:
+            press_pos = self._pressed_event_marker_press_pos
+            if press_pos is not None and not self._pressed_event_marker_drag_active:
+                dx = float(event.position().x()) - float(press_pos[0])
+                dy = float(event.position().y()) - float(press_pos[1])
+                if (dx * dx) + (dy * dy) >= 9.0:
+                    self._pressed_event_marker_drag_active = True
+            if self._pressed_event_marker_drag_active:
+                self._pressed_event_marker_drag_s_m = self._s_for_x(float(event.position().x()))
+                self.update()
+            event.accept()
+            return
         if self._scrub_active:
             self._scrub_moved = True
             self._emit_scrub_for_event(event)
@@ -617,6 +725,32 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.LeftButton and self._trigger_add_press_consumed:
+            self._trigger_add_press_consumed = False
+            self._pressed_hit = None
+            self._pressed_on_playhead = False
+            self._empty_press_scrubbed = False
+            event.accept()
+            return
+        if event.button() == Qt.LeftButton and self._pressed_event_marker is not None:
+            try:
+                if self._pressed_event_marker.path_index is not None:
+                    if self._pressed_event_marker_drag_active:
+                        target_s_m = self._s_for_x(float(event.position().x()))
+                        self.eventTriggerMoveRequested.emit(
+                            int(self._pressed_event_marker.path_index),
+                            float(target_s_m),
+                        )
+                    else:
+                        self.pathItemClicked.emit(int(self._pressed_event_marker.path_index))
+            finally:
+                self._pressed_event_marker = None
+                self._pressed_event_marker_press_pos = None
+                self._pressed_event_marker_drag_active = False
+                self._pressed_event_marker_drag_s_m = 0.0
+                self.update()
+            event.accept()
+            return
         if not self._scrub_active or event.button() != Qt.LeftButton:
             if event.button() == Qt.LeftButton and not self._scrub_moved:
                 if not self._empty_press_scrubbed:
@@ -643,6 +777,10 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             self.playPauseToggleRequested.emit()
         event.accept()
 
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._update_trigger_add_cursor()
+        super().leaveEvent(event)
+
     def _emit_scrub_for_event(self, event: QMouseEvent) -> None:
         self.scrubRequested.emit(self._s_for_x(float(event.position().x())))
 
@@ -660,6 +798,17 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         y = float(event.position().y())
         playhead_x = self._x_for_s(self._playhead_s_m)
         return abs(x - playhead_x) <= 8.0 and y <= (TOP_PADDING + RULER_HEIGHT)
+
+    def _marker_display_s(self, marker: TimelineMarker) -> float:
+        if (
+            self._pressed_event_marker is not None
+            and self._pressed_event_marker_drag_active
+            and marker.path_index is not None
+            and self._pressed_event_marker.path_index is not None
+            and int(marker.path_index) == int(self._pressed_event_marker.path_index)
+        ):
+            return float(self._pressed_event_marker_drag_s_m)
+        return float(marker.s_m)
 
     def _activate_click_hit(self, event: QMouseEvent) -> None:
         hit = self._hit_test(event.position().x(), event.position().y())
@@ -705,7 +854,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                     center_y = track_rect.center().y()
                     for marker in row.markers:
                         marker_rect = QRectF(
-                            self._x_for_s(marker.s_m) - 9.0,
+                            self._x_for_s(self._marker_display_s(marker)) - 9.0,
                             center_y - 11.0,
                             18.0,
                             22.0,
@@ -714,6 +863,27 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                             return ("marker", marker)
                 return None
         return None
+
+    def _row_at_y(self, y: float) -> TimelineRow | None:
+        if self._y_in_ruler(y):
+            return None
+        for row, (row_top, row_h) in zip(self._projection.rows, self._row_layout()):
+            if row_top <= y <= row_top + row_h:
+                return row
+        return None
+
+    def _update_trigger_add_cursor(self, y: float | None = None) -> None:
+        try:
+            if not self._trigger_add_armed:
+                self.unsetCursor()
+                return
+            row = self._row_at_y(float(y)) if y is not None else None
+            if row is not None and row.title == "Triggers":
+                self.setCursor(Qt.CrossCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
+        except Exception:
+            pass
 
     def _iter_span_rects(self, row: TimelineRow, track_rect: QRectF):
         _, lane_gap, lane_h, lanes_top = self._lane_metrics(row, track_rect)
@@ -752,6 +922,10 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def keyPressEvent(self, event) -> None:  # noqa: N802
         key = event.key()
         modifiers = event.modifiers()
+        if key in (Qt.Key_Delete, Qt.Key_Backspace):
+            self.deleteSelectionRequested.emit()
+            event.accept()
+            return
         if modifiers & Qt.ControlModifier:
             if key in (Qt.Key_Plus, Qt.Key_Equal):
                 self.zoomInRequested.emit()
@@ -786,6 +960,9 @@ class TimelineDock(QFrame):
     pathItemSelected = Signal(int)
     constraintRangeSelected = Signal(str, int, int)
     selectionCleared = Signal()
+    eventTriggerCreateRequested = Signal(float)
+    eventTriggerMoveRequested = Signal(int, float)
+    eventTriggerDeleteRequested = Signal(int)
 
     def __init__(self, path: Path | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -797,6 +974,7 @@ class TimelineDock(QFrame):
         self._total_time_s = 0.0
         self._is_playing = False
         self._minimum_zoom_px_per_m = MIN_ZOOM_PX_PER_M
+        self._trigger_add_armed = False
         self._play_pause_btn: QPushButton
         self._playback_label: QLabel
         self._summary_label: QLabel
@@ -958,6 +1136,7 @@ class TimelineDock(QFrame):
         self._rail_scroll.viewport().installEventFilter(self)
 
         self._rail_canvas = _TimelineRailCanvas()
+        self._rail_canvas.triggerAddClicked.connect(self._toggle_trigger_add_armed)
         self._rail_scroll.setWidget(self._rail_canvas)
         body_layout.addWidget(self._rail_scroll)
 
@@ -977,6 +1156,11 @@ class TimelineDock(QFrame):
         self._track_canvas.constraintSpanClicked.connect(self.select_constraint_range)
         self._track_canvas.constraintSpanClicked.connect(self.constraintRangeSelected)
         self._track_canvas.emptyAreaClicked.connect(self._on_empty_area_clicked)
+        self._track_canvas.eventTriggerCreateRequested.connect(
+            self._on_event_trigger_create_requested
+        )
+        self._track_canvas.eventTriggerMoveRequested.connect(self.eventTriggerMoveRequested)
+        self._track_canvas.deleteSelectionRequested.connect(self._on_delete_selection_requested)
         self._track_scroll.setWidget(self._track_canvas)
         self._track_scroll.setFocusProxy(self._track_canvas)
         body_layout.addWidget(self._track_scroll, 1)
@@ -987,6 +1171,7 @@ class TimelineDock(QFrame):
         )
 
         self._on_zoom_changed(self._zoom_slider.value())
+        self._apply_trigger_add_armed(False)
 
     def eventFilter(self, watched, event):  # noqa: N802
         if event.type() == QEvent.Wheel and watched in {
@@ -1261,9 +1446,36 @@ class TimelineDock(QFrame):
         self.clear_selection()
         self.selectionCleared.emit()
 
+    def _toggle_trigger_add_armed(self) -> None:
+        self._apply_trigger_add_armed(not self._trigger_add_armed)
+
+    def _apply_trigger_add_armed(self, armed: bool) -> None:
+        self._trigger_add_armed = bool(armed)
+        self._rail_canvas.set_trigger_add_armed(self._trigger_add_armed)
+        self._track_canvas.set_trigger_add_armed(self._trigger_add_armed)
+
+    def _on_event_trigger_create_requested(self, time_s: float) -> None:
+        self._apply_trigger_add_armed(False)
+        self.eventTriggerCreateRequested.emit(float(time_s))
+
+    def _on_delete_selection_requested(self) -> None:
+        if self._selection is None or self._selection.kind != "path":
+            return
+        index = self._selection.path_index
+        if index is None or self._path is None:
+            return
+        if index < 0 or index >= len(getattr(self._path, "path_elements", []) or []):
+            return
+        if isinstance(self._path.path_elements[index], EventTrigger):
+            self.eventTriggerDeleteRequested.emit(int(index))
+
     def keyPressEvent(self, event) -> None:  # noqa: N802
         key = event.key()
         modifiers = event.modifiers()
+        if key == Qt.Key_Escape and self._trigger_add_armed:
+            self._apply_trigger_add_armed(False)
+            event.accept()
+            return
         if modifiers & Qt.ControlModifier:
             if key in (Qt.Key_Plus, Qt.Key_Equal):
                 self._adjust_zoom(10)
@@ -2103,6 +2315,93 @@ def _closest_time_for_point(
     if best_idx is None:
         return None
     return float(sim_index.sample_t[best_idx])
+
+
+def resolve_trigger_placement_for_time(
+    path: Path,
+    config: dict[str, object] | None,
+    time_s: float,
+    *,
+    use_sim_time: bool = True,
+) -> TriggerPlacement | None:
+    path = path or Path()
+    path_elements = list(getattr(path, "path_elements", []) or [])
+    anchor_data = _build_anchor_distances(path_elements)
+    anchor_indices = list(anchor_data.get("anchor_indices", []) or [])
+    if len(anchor_indices) < 2:
+        return None
+
+    total_path_s = max(0.0, float(anchor_data.get("total_s_m", 0.0)))
+    display_s = max(total_path_s, 1.0)
+    projection = TimelineProjection(
+        total_s_m=total_path_s,
+        display_s_m=display_s,
+        summary_text="",
+        rows=[],
+    )
+    mapper, total_t, sim_index = _build_time_mapper(
+        path=path,
+        projection=projection,
+        config=dict(config or {}),
+        use_sim_time=use_sim_time,
+    )
+
+    target_time_s = max(0.0, min(float(time_s), float(max(total_t, 0.0))))
+    if sim_index is not None and len(sim_index.sample_t) >= 2:
+        sample_t = sim_index.sample_t
+        sample_s = sim_index.sample_s
+        idx = bisect.bisect_left(sample_t, target_time_s)
+        if idx <= 0:
+            target_s = float(sample_s[0])
+        elif idx >= len(sample_t):
+            target_s = float(sample_s[-1])
+        else:
+            t0 = float(sample_t[idx - 1])
+            t1 = float(sample_t[idx])
+            s0 = float(sample_s[idx - 1])
+            s1 = float(sample_s[idx])
+            if t1 <= t0 + 1e-9:
+                target_s = s0
+            else:
+                alpha = (target_time_s - t0) / (t1 - t0)
+                target_s = s0 + alpha * (s1 - s0)
+    else:
+        default_v = _safe_positive(
+            dict(config or {}).get("default_max_velocity_meters_per_sec", 4.5),
+            fallback=4.5,
+        )
+        target_s = target_time_s * default_v
+        if total_path_s > 1e-9:
+            target_s = max(0.0, min(float(target_s), float(total_path_s)))
+        else:
+            target_s = float(mapper(0.0))
+
+    anchor_s_by_path_index = dict(anchor_data.get("anchor_s_by_path_index", {}) or {})
+    segment_start_index = anchor_indices[0]
+    segment_end_index = anchor_indices[1]
+    segment_start_s = float(anchor_s_by_path_index.get(segment_start_index, 0.0))
+    segment_end_s = float(anchor_s_by_path_index.get(segment_end_index, segment_start_s))
+
+    for anchor_idx in range(len(anchor_indices) - 1):
+        start_idx = int(anchor_indices[anchor_idx])
+        end_idx = int(anchor_indices[anchor_idx + 1])
+        start_s = float(anchor_s_by_path_index.get(start_idx, 0.0))
+        end_s = float(anchor_s_by_path_index.get(end_idx, start_s))
+        segment_start_index = start_idx
+        segment_end_index = end_idx
+        segment_start_s = start_s
+        segment_end_s = end_s
+        if target_s <= end_s + 1e-9 or anchor_idx == len(anchor_indices) - 2:
+            break
+
+    seg_len = max(0.0, segment_end_s - segment_start_s)
+    if seg_len <= 1e-9:
+        t_ratio = 0.0
+    else:
+        t_ratio = (float(target_s) - segment_start_s) / seg_len
+    t_ratio = max(0.0, min(1.0, float(t_ratio)))
+
+    return TriggerPlacement(insert_index=int(segment_end_index), t_ratio=t_ratio)
 
 
 def _safe_positive(value, *, fallback: float) -> float:

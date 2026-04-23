@@ -77,11 +77,11 @@ Objective:
 
 Tasks:
 
-- [ ] Clicking a timeline item selects the matching canvas item
-- [ ] Canvas selection highlights the matching timeline item
-- [ ] Constraint selection highlights the affected field region
-- [ ] Clear selection stays stable across all three regions
-- [ ] Prevent signal loops and selection churn
+- [x] Clicking a timeline item selects the matching canvas item
+- [x] Canvas selection highlights the matching timeline item
+- [x] Constraint selection highlights the affected field region
+- [x] Clear selection stays stable across all three regions
+- [x] Prevent signal loops and selection churn
 
 Exit criteria:
 
@@ -95,11 +95,11 @@ Objective:
 
 Tasks:
 
-- [ ] Create a trigger from a clicked timeline location
-- [ ] Drag a trigger horizontally to reposition it
-- [ ] Delete a trigger from the timeline
-- [ ] Keep exact trigger property editing in the existing sidebar
-- [ ] Preserve undo/redo for create, move, and delete
+- [x] Create a trigger from a clicked timeline location
+- [x] Drag a trigger horizontally to reposition it
+- [x] Delete a trigger from the timeline
+- [x] Keep exact trigger property editing in the existing sidebar
+- [x] Preserve undo/redo for create, move, and delete
 
 Exit criteria:
 

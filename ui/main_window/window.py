@@ -33,6 +33,7 @@ from ..sidebar.utils import clamp_from_metadata
 from models.path_model import TranslationTarget, RotationTarget, Waypoint, Path, EventTrigger
 from ..canvas import CanvasView, FIELD_LENGTH_METERS, FIELD_WIDTH_METERS
 from ..timeline import TimelinePlaceholder
+from ..timeline.placeholder import resolve_trigger_placement_for_time
 from typing import Tuple, Optional
 from utils.project_manager import ProjectManager
 from utils.undo_system import UndoRedoManager, PathCommand, ConfigCommand
@@ -188,6 +189,18 @@ class MainWindow(WindowEventMixin, QMainWindow):
         )
         self.timeline.constraintRangeSelected.connect(
             lambda key, s, e: self.canvas.set_constraint_segment_highlight(key, s, e),
+            Qt.QueuedConnection,
+        )
+        self.timeline.eventTriggerCreateRequested.connect(
+            self._on_timeline_event_trigger_create_requested,
+            Qt.QueuedConnection,
+        )
+        self.timeline.eventTriggerMoveRequested.connect(
+            self._on_timeline_event_trigger_move_requested,
+            Qt.QueuedConnection,
+        )
+        self.timeline.eventTriggerDeleteRequested.connect(
+            self._on_timeline_event_trigger_delete_requested,
             Qt.QueuedConnection,
         )
         self.timeline.selectionCleared.connect(self.sidebar.clear_selection, Qt.QueuedConnection)
@@ -348,6 +361,97 @@ class MainWindow(WindowEventMixin, QMainWindow):
         old_state = copy.deepcopy(self.path)
         self.sidebar._on_remove_element(idx)
         self._record_path_change("Delete element", old_state)
+
+    def _on_timeline_event_trigger_create_requested(self, time_s: float) -> None:
+        if getattr(self, "_layout_stabilizing", False):
+            return
+        placement = resolve_trigger_placement_for_time(self.path, self._timeline_config(), time_s)
+        if placement is None:
+            return
+
+        old_state = copy.deepcopy(self.path)
+        old_selected = self.sidebar.get_selected_index()
+        new_trigger = EventTrigger(t_ratio=float(placement.t_ratio), lib_key="")
+        insert_index = max(0, min(int(placement.insert_index), len(self.path.path_elements)))
+        self.path.path_elements.insert(insert_index, new_trigger)
+        structure_changed = bool(self.sidebar._check_and_swap_rotation_targets())
+        new_index = next(
+            (i for i, element in enumerate(self.path.path_elements) if id(element) == id(new_trigger)),
+            insert_index,
+        )
+
+        self._refresh_after_undo_redo(selected_index=new_index)
+
+        if self._has_path_changed_since(old_state):
+            self._record_path_change(
+                "Add EventTrigger",
+                old_state,
+                suppress_first_refresh=not structure_changed,
+                restore_index_on_undo=old_selected,
+            )
+
+    def _on_timeline_event_trigger_move_requested(self, index: int, time_s: float) -> None:
+        if getattr(self, "_layout_stabilizing", False):
+            return
+        if index < 0 or index >= len(self.path.path_elements):
+            return
+        trigger = self.path.path_elements[index]
+        if not isinstance(trigger, EventTrigger):
+            return
+
+        old_state = copy.deepcopy(self.path)
+        trigger_identity = id(trigger)
+        moving_trigger = self.path.path_elements.pop(index)
+        placement = resolve_trigger_placement_for_time(self.path, self._timeline_config(), time_s)
+        if placement is None:
+            self.path.path_elements.insert(index, moving_trigger)
+            return
+
+        moving_trigger.t_ratio = float(placement.t_ratio)
+        insert_index = max(0, min(int(placement.insert_index), len(self.path.path_elements)))
+        self.path.path_elements.insert(insert_index, moving_trigger)
+        structure_changed = bool(self.sidebar._check_and_swap_rotation_targets())
+        new_index = next(
+            (
+                i
+                for i, element in enumerate(self.path.path_elements)
+                if id(element) == trigger_identity
+            ),
+            insert_index,
+        )
+
+        self._refresh_after_undo_redo(selected_index=new_index)
+
+        if self._has_path_changed_since(old_state):
+            self._record_path_change(
+                "Move EventTrigger",
+                old_state,
+                suppress_first_refresh=not structure_changed,
+                restore_index_on_undo=index,
+            )
+
+    def _on_timeline_event_trigger_delete_requested(self, index: int) -> None:
+        if getattr(self, "_layout_stabilizing", False):
+            return
+        if index < 0 or index >= len(self.path.path_elements):
+            return
+        if not isinstance(self.path.path_elements[index], EventTrigger):
+            return
+
+        old_state = copy.deepcopy(self.path)
+        self.path.path_elements.pop(index)
+        self.sidebar.clear_selection()
+        self.timeline.clear_selection()
+        self.canvas.clear_selection()
+        self._refresh_after_undo_redo(selected_index=None)
+
+        if self._has_path_changed_since(old_state):
+            self._record_path_change(
+                "Delete EventTrigger",
+                old_state,
+                suppress_first_refresh=True,
+                restore_index_on_undo=index,
+            )
 
     # ---------------- Menu Bar ----------------
     def _populate_load_path_menu(self):
@@ -619,7 +723,15 @@ class MainWindow(WindowEventMixin, QMainWindow):
 
         # Override the cached selection index so set_path restores the right element
         if selected_index is not None:
-            self.sidebar._last_selected_index = selected_index
+            try:
+                if 0 <= int(selected_index) < len(self.path.path_elements):
+                    self.sidebar._selected_index = int(selected_index)
+                    self.sidebar._last_selected_index = int(selected_index)
+                    self.sidebar._selected_element_identity = id(
+                        self.path.path_elements[int(selected_index)]
+                    )
+            except Exception:
+                self.sidebar._last_selected_index = selected_index
 
         # Refresh sidebar
         self.sidebar.set_path(self.path)
