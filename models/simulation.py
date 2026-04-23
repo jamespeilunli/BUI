@@ -791,7 +791,21 @@ def simulate_path(
         else:
             x += step_dx
             y += step_dy
-        theta = wrap_angle_radians(theta + limited.omega_radps * dt_s)
+
+        # Apply the same last-segment overshoot protection to rotation. Without
+        # this, the robot can reach the final point and then dither around the
+        # target heading without ever landing inside the exact snap threshold,
+        # causing the simulation to run until the guard timeout.
+        angular_step = limited.omega_radps * dt_s
+        if seg_idx == len(segments) - 1 and dist_to_target < 0.1:
+            final_angular_error = shortest_angular_distance(end_heading_target, theta)
+            if abs(angular_step) >= max(0.0, abs(final_angular_error) - _EPS_ANG):
+                theta = end_heading_target
+                limited = ChassisSpeeds(limited.vx_mps, limited.vy_mps, 0.0)
+            else:
+                theta = wrap_angle_radians(theta + angular_step)
+        else:
+            theta = wrap_angle_radians(theta + angular_step)
 
         current_seg = segments[min(seg_idx, len(segments) - 1)]
         current_proj = dot(x - current_seg.ax, y - current_seg.ay, current_seg.ux, current_seg.uy)
