@@ -29,8 +29,15 @@ import os
 import copy
 
 from ..sidebar import Sidebar
-from ..sidebar.utils import clamp_from_metadata
-from models.path_model import TranslationTarget, RotationTarget, Waypoint, Path, EventTrigger
+from ..sidebar.utils import RANGED_CONSTRAINT_KEYS, clamp_from_metadata
+from models.path_model import (
+    EventTrigger,
+    Path,
+    RangedConstraint,
+    RotationTarget,
+    TranslationTarget,
+    Waypoint,
+)
 from ..canvas import CanvasView, FIELD_LENGTH_METERS, FIELD_WIDTH_METERS
 from ..timeline import TimelinePlaceholder
 from ..timeline.placeholder import resolve_trigger_placement_for_time
@@ -201,6 +208,23 @@ class MainWindow(WindowEventMixin, QMainWindow):
         )
         self.timeline.eventTriggerDeleteRequested.connect(
             self._on_timeline_event_trigger_delete_requested,
+            Qt.QueuedConnection,
+        )
+        self.sidebar.constraintTypeChanged.connect(
+            self.timeline.set_constraint_create_key,
+            Qt.QueuedConnection,
+        )
+        self.timeline.set_constraint_create_key(self.sidebar.get_active_constraint_key())
+        self.timeline.constraintRangeCreateRequested.connect(
+            self._on_timeline_constraint_range_create_requested,
+            Qt.QueuedConnection,
+        )
+        self.timeline.constraintRangeUpdateRequested.connect(
+            self._on_timeline_constraint_range_update_requested,
+            Qt.QueuedConnection,
+        )
+        self.timeline.constraintRangeDeleteRequested.connect(
+            self._on_timeline_constraint_range_delete_requested,
             Qt.QueuedConnection,
         )
         self.timeline.selectionCleared.connect(self.sidebar.clear_selection, Qt.QueuedConnection)
@@ -451,6 +475,228 @@ class MainWindow(WindowEventMixin, QMainWindow):
                 old_state,
                 suppress_first_refresh=True,
                 restore_index_on_undo=index,
+            )
+
+    def _constraint_domain_total(self, key: str) -> int:
+        try:
+            _domain, count = self.sidebar.constraint_manager.get_domain_info_for_key(str(key))
+            return max(0, int(count))
+        except Exception:
+            return 0
+
+    def _normalized_constraint_range(self, key: str, start: int, end: int) -> tuple[int, int] | None:
+        total = self._constraint_domain_total(str(key))
+        if total <= 0:
+            return None
+        start_i = int(start)
+        end_i = int(end)
+        if start_i > end_i:
+            start_i, end_i = end_i, start_i
+        start_i = max(1, min(start_i, total))
+        end_i = max(start_i, min(end_i, total))
+        return start_i, end_i
+
+    def _constraint_range_available(
+        self,
+        key: str,
+        start: int,
+        end: int,
+        *,
+        ignore_index: int | None = None,
+    ) -> bool:
+        for idx, rc in enumerate(getattr(self.path, "ranged_constraints", []) or []):
+            if ignore_index is not None and int(idx) == int(ignore_index):
+                continue
+            if getattr(rc, "key", None) != key:
+                continue
+            other_start = int(getattr(rc, "start_ordinal", 1))
+            other_end = int(getattr(rc, "end_ordinal", other_start))
+            if int(start) <= other_end and int(end) >= other_start:
+                return False
+        return True
+
+    def _find_constraint_index(
+        self,
+        index: int,
+        key: str,
+        start: int,
+        end: int,
+    ) -> int | None:
+        constraints = list(getattr(self.path, "ranged_constraints", []) or [])
+        if 0 <= int(index) < len(constraints):
+            rc = constraints[int(index)]
+            if (
+                getattr(rc, "key", None) == key
+                and int(getattr(rc, "start_ordinal", -1)) == int(start)
+                and int(getattr(rc, "end_ordinal", -1)) == int(end)
+            ):
+                return int(index)
+        for idx, rc in enumerate(constraints):
+            if (
+                getattr(rc, "key", None) == key
+                and int(getattr(rc, "start_ordinal", -1)) == int(start)
+                and int(getattr(rc, "end_ordinal", -1)) == int(end)
+            ):
+                return int(idx)
+        return None
+
+    def _refresh_after_timeline_constraint_edit(
+        self,
+        selection: tuple[str, int, int] | None,
+    ) -> None:
+        self.canvas.refresh_from_model()
+        self.canvas.update_handoff_radius_visualizers()
+        self.canvas.request_simulation_rebuild()
+        self.timeline.set_path(self.path, self._timeline_config())
+        self.sidebar.set_path(self.path)
+        if selection is None:
+            self.sidebar.clear_selection()
+            self.timeline.clear_selection()
+            self.canvas.clear_constraint_range_overlay()
+            self.canvas.clear_constraint_segment_highlight()
+        else:
+            key, start, end = selection
+            self.sidebar.select_constraint_range(key, start, end, emit_preview=False)
+            self.timeline.select_constraint_range(key, start, end)
+            self.canvas.show_constraint_range_overlay(key, start, end)
+            self.canvas.set_constraint_segment_highlight(key, start, end)
+        self.autosave.schedule()
+
+    def _record_timeline_constraint_change(
+        self,
+        description: str,
+        old_state: Path,
+        *,
+        redo_selection: tuple[str, int, int] | None,
+        undo_selection: tuple[str, int, int] | None,
+    ) -> None:
+        def create_command():
+            command = PathCommand(
+                path_ref=self.path,
+                old_state=old_state,
+                new_state=copy.deepcopy(self.path),
+                description=description,
+                on_change_callback=lambda: self._refresh_after_timeline_constraint_edit(
+                    redo_selection
+                ),
+                suppress_first_callback=True,
+                on_undo_callback=lambda: self._refresh_after_timeline_constraint_edit(
+                    undo_selection
+                ),
+            )
+            self.undo_manager.execute_command(command)
+
+        QTimer.singleShot(0, create_command)
+
+    def _on_timeline_constraint_range_create_requested(
+        self,
+        key: str,
+        start_ordinal: int,
+        end_ordinal: int,
+    ) -> None:
+        if getattr(self, "_layout_stabilizing", False):
+            return
+        key = str(key)
+        if key not in RANGED_CONSTRAINT_KEYS:
+            return
+        normalized = self._normalized_constraint_range(key, start_ordinal, end_ordinal)
+        if normalized is None:
+            return
+        start, end = normalized
+        if not self._constraint_range_available(key, start, end):
+            return
+
+        old_state = copy.deepcopy(self.path)
+        value = self.sidebar.constraint_manager.get_default_value(key)
+        if getattr(self.path, "ranged_constraints", None) is None:
+            self.path.ranged_constraints = []
+        self.path.ranged_constraints.append(
+            RangedConstraint(key=key, value=float(value), start_ordinal=start, end_ordinal=end)
+        )
+        try:
+            setattr(self.path.constraints, key, None)
+        except Exception:
+            pass
+
+        selection = (key, start, end)
+        self._refresh_after_timeline_constraint_edit(selection)
+        if self._has_path_changed_since(old_state):
+            self._record_timeline_constraint_change(
+                "Add constraint range",
+                old_state,
+                redo_selection=selection,
+                undo_selection=None,
+            )
+
+    def _on_timeline_constraint_range_update_requested(
+        self,
+        index: int,
+        key: str,
+        old_start: int,
+        old_end: int,
+        new_start: int,
+        new_end: int,
+        action: str,
+    ) -> None:
+        if getattr(self, "_layout_stabilizing", False):
+            return
+        key = str(key)
+        normalized = self._normalized_constraint_range(key, new_start, new_end)
+        if normalized is None:
+            return
+        target_start, target_end = normalized
+        constraint_index = self._find_constraint_index(index, key, old_start, old_end)
+        if constraint_index is None:
+            return
+        if not self._constraint_range_available(
+            key,
+            target_start,
+            target_end,
+            ignore_index=constraint_index,
+        ):
+            return
+
+        rc = self.path.ranged_constraints[constraint_index]
+        old_state = copy.deepcopy(self.path)
+        undo_selection = (key, int(getattr(rc, "start_ordinal", old_start)), int(getattr(rc, "end_ordinal", old_end)))
+        rc.start_ordinal = int(target_start)
+        rc.end_ordinal = int(target_end)
+        redo_selection = (key, int(target_start), int(target_end))
+
+        self._refresh_after_timeline_constraint_edit(redo_selection)
+        if self._has_path_changed_since(old_state):
+            desc = "Move constraint range" if str(action) == "move" else "Edit constraint range"
+            self._record_timeline_constraint_change(
+                desc,
+                old_state,
+                redo_selection=redo_selection,
+                undo_selection=undo_selection,
+            )
+
+    def _on_timeline_constraint_range_delete_requested(
+        self,
+        index: int,
+        key: str,
+        start_ordinal: int,
+        end_ordinal: int,
+    ) -> None:
+        if getattr(self, "_layout_stabilizing", False):
+            return
+        key = str(key)
+        constraint_index = self._find_constraint_index(index, key, start_ordinal, end_ordinal)
+        if constraint_index is None:
+            return
+
+        old_state = copy.deepcopy(self.path)
+        undo_selection = (key, int(start_ordinal), int(end_ordinal))
+        self.path.ranged_constraints.pop(constraint_index)
+        self._refresh_after_timeline_constraint_edit(None)
+        if self._has_path_changed_since(old_state):
+            self._record_timeline_constraint_change(
+                "Delete constraint range",
+                old_state,
+                redo_selection=None,
+                undo_selection=undo_selection,
             )
 
     # ---------------- Menu Bar ----------------

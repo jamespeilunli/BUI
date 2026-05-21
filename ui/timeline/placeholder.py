@@ -81,6 +81,7 @@ class TimelineSpan:
     label: str
     color: str
     lane: int = 0
+    constraint_index: int | None = None
     constraint_key: str | None = None
     start_ordinal: int | None = None
     end_ordinal: int | None = None
@@ -95,6 +96,10 @@ class TimelineRow:
     lane_count: int = 1
     constraint_key: str | None = None
     constraint_keys: list[str] = field(default_factory=list)
+    constraint_positions_by_key: dict[str, list[float]] = field(default_factory=dict)
+    constraint_display_ranges_by_key: dict[str, list[tuple[float, float]]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass
@@ -294,14 +299,20 @@ class _TimelineCanvasBase(QWidget):
 
 class _TimelineRailCanvas(_TimelineCanvasBase):
     triggerAddClicked = Signal()
+    constraintAddClicked = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.MinimumExpanding)
         self._trigger_add_armed = False
+        self._constraint_add_armed = False
 
     def set_trigger_add_armed(self, armed: bool) -> None:
         self._trigger_add_armed = bool(armed)
+        self.update()
+
+    def set_constraint_add_armed(self, armed: bool) -> None:
+        self._constraint_add_armed = bool(armed)
         self.update()
 
     def _draw_ruler(self, painter: QPainter) -> None:
@@ -326,13 +337,15 @@ class _TimelineRailCanvas(_TimelineCanvasBase):
         text_y = int(y + (row_height + fm.ascent() - fm.descent()) / 2.0)
         painter.drawText(14, text_y, row.title)
         if row.title == "Triggers":
-            self._draw_trigger_add_button(painter, y, row_height)
+            self._draw_add_button(painter, y, row_height, self._trigger_add_armed)
+        elif row.title == "Constraints":
+            self._draw_add_button(painter, y, row_height, self._constraint_add_armed)
 
-    def _draw_trigger_add_button(self, painter: QPainter, y: int, row_height: int) -> None:
-        rect = self._trigger_add_button_rect(y, row_height)
-        fill = QColor("#2f6f52") if self._trigger_add_armed else QColor("#23272c")
-        border = QColor("#6bd39a") if self._trigger_add_armed else QColor("#3a4047")
-        text = QColor("#eef4f8") if self._trigger_add_armed else QColor("#d7dde4")
+    def _draw_add_button(self, painter: QPainter, y: int, row_height: int, armed: bool) -> None:
+        rect = self._add_button_rect(y, row_height)
+        fill = QColor("#2f6f52") if armed else QColor("#23272c")
+        border = QColor("#6bd39a") if armed else QColor("#3a4047")
+        text = QColor("#eef4f8") if armed else QColor("#d7dde4")
         painter.save()
         painter.setPen(QPen(border, 1))
         painter.setBrush(fill)
@@ -345,7 +358,7 @@ class _TimelineRailCanvas(_TimelineCanvasBase):
         painter.drawText(int(text_x), int(text_y), plus)
         painter.restore()
 
-    def _trigger_add_button_rect(self, y: int, row_height: int) -> QRectF:
+    def _add_button_rect(self, y: int, row_height: int) -> QRectF:
         button_size = min(18.0, max(14.0, float(row_height) - 10.0))
         x = HEADER_WIDTH - button_size - 10.0
         y_pos = y + max(2.0, (float(row_height) - button_size) / 2.0)
@@ -354,10 +367,13 @@ class _TimelineRailCanvas(_TimelineCanvasBase):
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() == Qt.LeftButton:
             for row, (row_top, row_h) in zip(self._projection.rows, self._row_layout()):
-                if row.title != "Triggers":
+                if row.title not in {"Triggers", "Constraints"}:
                     continue
-                if self._trigger_add_button_rect(row_top, row_h).contains(event.position()):
-                    self.triggerAddClicked.emit()
+                if self._add_button_rect(row_top, row_h).contains(event.position()):
+                    if row.title == "Triggers":
+                        self.triggerAddClicked.emit()
+                    else:
+                        self.constraintAddClicked.emit()
                     event.accept()
                     return
         super().mousePressEvent(event)
@@ -373,6 +389,9 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     emptyAreaClicked = Signal()
     eventTriggerCreateRequested = Signal(float)
     eventTriggerMoveRequested = Signal(int, float)
+    constraintRangeCreateRequested = Signal(str, int, int)
+    constraintRangeUpdateRequested = Signal(int, str, int, int, int, int, str)
+    constraintRangeDeleteRequested = Signal(int, str, int, int)
     deleteSelectionRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -393,6 +412,20 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._pressed_event_marker_press_pos: tuple[float, float] | None = None
         self._trigger_add_armed = False
         self._trigger_add_press_consumed = False
+        self._constraint_add_armed = False
+        self._constraint_create_key = str(RANGED_CONSTRAINT_KEYS[0])
+        self._constraint_add_press_consumed = False
+        self._pressed_constraint_span: TimelineSpan | None = None
+        self._pressed_constraint_action: str | None = None
+        self._pressed_constraint_origin: tuple[int, int] | None = None
+        self._pressed_constraint_preview: tuple[int, int] | None = None
+        self._pressed_constraint_press_pos: tuple[float, float] | None = None
+        self._pressed_constraint_drag_active = False
+        self._pressed_constraint_drag_offset = 0
+        self._creating_constraint_key: str | None = None
+        self._creating_constraint_start: int | None = None
+        self._creating_constraint_anchor_s_m: float | None = None
+        self._creating_constraint_preview: tuple[int, int] | None = None
         self.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -401,6 +434,15 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._trigger_add_armed = bool(armed)
         self._update_trigger_add_cursor()
         self.update()
+
+    def set_constraint_add_armed(self, armed: bool) -> None:
+        self._constraint_add_armed = bool(armed)
+        self._update_constraint_add_cursor()
+        self.update()
+
+    def set_constraint_create_key(self, key: str) -> None:
+        if key in RANGED_CONSTRAINT_KEYS:
+            self._constraint_create_key = str(key)
 
     def set_zoom_px_per_m(self, zoom_px_per_m: int) -> None:
         self._zoom_px_per_m = max(MIN_ZOOM_PX_PER_M, min(MAX_ZOOM_PX_PER_M, int(zoom_px_per_m)))
@@ -497,7 +539,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         painter.setPen(QColor("#30353b"))
         painter.drawLine(0, y + row_height - 1, self.width(), y + row_height - 1)
 
-        if row.spans:
+        if row.spans or self._has_constraint_create_preview(row):
             self._draw_spans(painter, row, track_rect)
             return
         if row.markers:
@@ -509,6 +551,14 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             int(track_rect.left()),
             int(track_rect.center().y() + 5),
             row.empty_text,
+        )
+
+    def _has_constraint_create_preview(self, row: TimelineRow) -> bool:
+        return bool(
+            row.title == "Constraints"
+            and self._creating_constraint_key
+            and self._creating_constraint_preview is not None
+            and self._creating_constraint_key in row.constraint_positions_by_key
         )
 
     def paintEvent(self, event) -> None:  # noqa: N802
@@ -630,13 +680,18 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         )
 
         for span in row.spans:
-            x0 = self._x_for_s(span.start_s_m)
-            x1 = self._x_for_s(span.end_s_m)
+            start_s_m, end_s_m = self._span_display_bounds(span, row)
+            x0 = self._x_for_s(start_s_m)
+            x1 = self._x_for_s(end_s_m)
             if x1 < x0:
                 x0, x1 = x1, x0
-            center_x = (x0 + x1) / 2.0
-            width = max(8.0, x1 - x0)
-            left_x = center_x - (width / 2.0)
+            if abs(x1 - x0) < 1.0:
+                center_x = (x0 + x1) / 2.0
+                width = 8.0
+                left_x = center_x - (width / 2.0)
+            else:
+                width = max(1.0, x1 - x0)
+                left_x = x0
             lane_index = max(0, int(getattr(span, "lane", 0)))
             bar_y = lanes_top + lane_index * (lane_h + lane_gap)
             rect = QRectF(left_x, bar_y, width, lane_h)
@@ -656,6 +711,17 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             painter.setBrush(fill)
             painter.drawRect(rect)
 
+            if self._is_span_selected(span) or self._pressed_constraint_span is span:
+                handle_w = min(6.0, max(3.0, rect.width() / 3.0))
+                painter.fillRect(
+                    QRectF(rect.left(), rect.top(), handle_w, rect.height()),
+                    QColor("#f4f7fa"),
+                )
+                painter.fillRect(
+                    QRectF(rect.right() - handle_w, rect.top(), handle_w, rect.height()),
+                    QColor("#f4f7fa"),
+                )
+
             text_rect = QRectF(rect.left() + 5, rect.top(), rect.width() - 10, rect.height())
             if span.label and text_rect.width() > 1.0:
                 painter.save()
@@ -667,6 +733,142 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                     span.label,
                 )
                 painter.restore()
+
+        if (
+            self._creating_constraint_key
+            and self._creating_constraint_preview is not None
+            and self._creating_constraint_key in row.constraint_positions_by_key
+        ):
+            start_ord, end_ord = self._creating_constraint_preview
+            positions = row.constraint_positions_by_key.get(self._creating_constraint_key, [])
+            if positions:
+                start_s, end_s = _constraint_display_range_from_positions(
+                    positions,
+                    start_ord,
+                    end_ord,
+                )
+                x0 = self._x_for_s(start_s)
+                x1 = self._x_for_s(end_s)
+                if x1 < x0:
+                    x0, x1 = x1, x0
+                if abs(x1 - x0) < 1.0:
+                    center_x = (x0 + x1) / 2.0
+                    x0 = center_x - 4.0
+                    x1 = center_x + 4.0
+                preview_rect = QRectF(x0, lanes_top, max(1.0, x1 - x0), lane_h)
+                color = QColor(_constraint_color(self._creating_constraint_key))
+                color.setAlpha(120)
+                painter.setPen(QPen(QColor("#e8eef5"), 1.2, Qt.DashLine))
+                painter.setBrush(color)
+                painter.drawRect(preview_rect)
+
+    def _span_display_bounds(self, span: TimelineSpan, row: TimelineRow) -> tuple[float, float]:
+        if (
+            self._pressed_constraint_span is span
+            and self._pressed_constraint_preview is not None
+            and span.constraint_key
+        ):
+            positions = row.constraint_positions_by_key.get(str(span.constraint_key), [])
+            if positions:
+                start_ord, end_ord = self._pressed_constraint_preview
+                return _constraint_display_range_from_positions(positions, start_ord, end_ord)
+        return float(span.start_s_m), float(span.end_s_m)
+
+    def _ordinal_for_x(self, row: TimelineRow, key: str, x: float) -> int | None:
+        positions = list(row.constraint_positions_by_key.get(str(key), []) or [])
+        if not positions:
+            return None
+        total = len(positions)
+        if total <= 1:
+            return 1
+        s_m = self._s_for_x(float(x))
+        if s_m <= positions[0]:
+            return 1
+        if s_m >= positions[-1]:
+            return total
+        right_idx = bisect.bisect_left(positions, s_m)
+        left_idx = max(0, right_idx - 1)
+        right_idx = min(total - 1, right_idx)
+        if abs(float(s_m) - float(positions[left_idx])) <= abs(float(positions[right_idx]) - float(s_m)):
+            return left_idx + 1
+        return right_idx + 1
+
+    def _constraint_range_available(
+        self,
+        row: TimelineRow,
+        key: str,
+        start_ordinal: int,
+        end_ordinal: int,
+        *,
+        ignore_index: int | None = None,
+    ) -> bool:
+        start_ordinal = int(start_ordinal)
+        end_ordinal = int(end_ordinal)
+        if start_ordinal > end_ordinal:
+            start_ordinal, end_ordinal = end_ordinal, start_ordinal
+        for span in row.spans:
+            if span.constraint_key != key:
+                continue
+            if ignore_index is not None and span.constraint_index == ignore_index:
+                continue
+            span_start = int(span.start_ordinal or 1)
+            span_end = int(span.end_ordinal or span_start)
+            if start_ordinal <= span_end and end_ordinal >= span_start:
+                return False
+        return True
+
+    def _constraint_row(self) -> TimelineRow | None:
+        for row in self._projection.rows:
+            if row.title == "Constraints":
+                return row
+        return None
+
+    def _update_constraint_drag_preview(self, x: float) -> None:
+        span = self._pressed_constraint_span
+        row = self._constraint_row()
+        if span is None or row is None or not span.constraint_key:
+            return
+        origin = self._pressed_constraint_origin
+        if origin is None:
+            return
+        start_ord, end_ord = origin
+        action = self._pressed_constraint_action or "move"
+        if action == "resize_start":
+            positions = row.constraint_positions_by_key.get(str(span.constraint_key), [])
+            target_start = _constraint_start_ordinal_for_s(
+                list(positions),
+                int(end_ord),
+                self._s_for_x(float(x)),
+            )
+            if target_start is None:
+                return
+            new_start = max(1, min(int(target_start), end_ord))
+            new_end = end_ord
+        elif action == "resize_end":
+            target_ordinal = self._ordinal_for_x(row, str(span.constraint_key), float(x))
+            if target_ordinal is None:
+                return
+            new_start = start_ord
+            new_end = max(start_ord, int(target_ordinal))
+        else:
+            positions = row.constraint_positions_by_key.get(str(span.constraint_key), [])
+            move_range = _constraint_move_range_for_s(
+                list(positions),
+                int(start_ord),
+                int(end_ord),
+                self._s_for_x(float(x)),
+            )
+            if move_range is None:
+                return
+            new_start, new_end = move_range
+        if self._constraint_range_available(
+            row,
+            str(span.constraint_key),
+            int(new_start),
+            int(new_end),
+            ignore_index=span.constraint_index,
+        ):
+            self._pressed_constraint_preview = (int(new_start), int(new_end))
 
     def _draw_playhead(self, painter: QPainter) -> None:
         x = self._x_for_s(self._playhead_s_m)
@@ -703,6 +905,17 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._empty_press_scrubbed = False
         self._scrub_moved = False
         self._trigger_add_press_consumed = False
+        self._constraint_add_press_consumed = False
+        self._pressed_constraint_span = None
+        self._pressed_constraint_action = None
+        self._pressed_constraint_origin = None
+        self._pressed_constraint_preview = None
+        self._pressed_constraint_press_pos = None
+        self._pressed_constraint_drag_active = False
+        self._creating_constraint_key = None
+        self._creating_constraint_start = None
+        self._creating_constraint_anchor_s_m = None
+        self._creating_constraint_preview = None
         self._pressed_on_playhead = self._is_playhead_click(event)
         pressed_row = self._row_at_y(float(event.position().y()))
         if self._trigger_add_armed and pressed_row is not None and pressed_row.title == "Triggers":
@@ -710,8 +923,60 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             self._trigger_add_press_consumed = True
             event.accept()
             return
+        if (
+            self._constraint_add_armed
+            and pressed_row is not None
+            and pressed_row.title == "Constraints"
+            and self._pressed_hit is None
+        ):
+            positions = pressed_row.constraint_positions_by_key.get(self._constraint_create_key, [])
+            anchor_s_m = self._s_for_x(float(event.position().x()))
+            preview = _constraint_creation_range_for_s(
+                list(positions),
+                anchor_s_m,
+                anchor_s_m,
+            )
+            if preview is not None:
+                self._creating_constraint_key = self._constraint_create_key
+                self._creating_constraint_start = int(preview[0])
+                self._creating_constraint_anchor_s_m = float(anchor_s_m)
+                self._constraint_add_press_consumed = True
+                if self._constraint_range_available(
+                    pressed_row,
+                    self._constraint_create_key,
+                    int(preview[0]),
+                    int(preview[1]),
+                ):
+                    self._creating_constraint_preview = (int(preview[0]), int(preview[1]))
+                event.accept()
+                return
         if self._pressed_hit is not None:
             hit_kind, payload = self._pressed_hit
+            if hit_kind in {"span", "span_edge"}:
+                if hit_kind == "span_edge":
+                    span, side = payload
+                    action = "resize_start" if side == "start" else "resize_end"
+                else:
+                    span = payload
+                    action = "move"
+                if isinstance(span, TimelineSpan):
+                    self._pressed_constraint_span = span
+                    self._pressed_constraint_action = action
+                    start_ord = int(span.start_ordinal or 1)
+                    end_ord = int(span.end_ordinal or start_ord)
+                    self._pressed_constraint_origin = (start_ord, end_ord)
+                    self._pressed_constraint_preview = (start_ord, end_ord)
+                    self._pressed_constraint_press_pos = (
+                        float(event.position().x()),
+                        float(event.position().y()),
+                    )
+                    row = self._constraint_row()
+                    if row is not None and span.constraint_key:
+                        click_ord = self._ordinal_for_x(row, str(span.constraint_key), float(event.position().x()))
+                        if click_ord is not None:
+                            self._pressed_constraint_drag_offset = int(click_ord) - start_ord
+                    event.accept()
+                    return
             if (
                 hit_kind == "marker"
                 and isinstance(payload, TimelineMarker)
@@ -736,7 +1001,47 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         self._update_trigger_add_cursor(float(event.position().y()))
+        self._update_constraint_add_cursor(float(event.position().y()))
         if self._trigger_add_press_consumed:
+            event.accept()
+            return
+        if self._constraint_add_press_consumed:
+            row = self._constraint_row()
+            if (
+                row is not None
+                and self._creating_constraint_key
+                and self._creating_constraint_anchor_s_m is not None
+            ):
+                positions = row.constraint_positions_by_key.get(self._creating_constraint_key, [])
+                preview = _constraint_creation_range_for_s(
+                    list(positions),
+                    float(self._creating_constraint_anchor_s_m),
+                    self._s_for_x(float(event.position().x())),
+                )
+                if preview is not None:
+                    start, end = preview
+                    if self._constraint_range_available(
+                        row,
+                        self._creating_constraint_key,
+                        start,
+                        end,
+                    ):
+                        self._creating_constraint_preview = (start, end)
+                    else:
+                        self._creating_constraint_preview = None
+                    self.update()
+            event.accept()
+            return
+        if self._pressed_constraint_span is not None:
+            press_pos = self._pressed_constraint_press_pos
+            if press_pos is not None and not self._pressed_constraint_drag_active:
+                dx = float(event.position().x()) - float(press_pos[0])
+                dy = float(event.position().y()) - float(press_pos[1])
+                if (dx * dx) + (dy * dy) >= 9.0:
+                    self._pressed_constraint_drag_active = True
+            if self._pressed_constraint_drag_active:
+                self._update_constraint_drag_preview(float(event.position().x()))
+                self.update()
             event.accept()
             return
         if self._pressed_event_marker is not None:
@@ -764,6 +1069,71 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             self._pressed_hit = None
             self._pressed_on_playhead = False
             self._empty_press_scrubbed = False
+            event.accept()
+            return
+        if event.button() == Qt.LeftButton and self._constraint_add_press_consumed:
+            try:
+                if self._creating_constraint_key and self._creating_constraint_preview is not None:
+                    start_ord, end_ord = self._creating_constraint_preview
+                    self.constraintRangeCreateRequested.emit(
+                        str(self._creating_constraint_key),
+                        int(start_ord),
+                        int(end_ord),
+                    )
+            finally:
+                self._constraint_add_press_consumed = False
+                self._creating_constraint_key = None
+                self._creating_constraint_start = None
+                self._creating_constraint_anchor_s_m = None
+                self._creating_constraint_preview = None
+                self._pressed_hit = None
+                self._pressed_on_playhead = False
+                self._empty_press_scrubbed = False
+                self.update()
+            event.accept()
+            return
+        if event.button() == Qt.LeftButton and self._pressed_constraint_span is not None:
+            try:
+                span = self._pressed_constraint_span
+                if self._pressed_constraint_drag_active and self._pressed_constraint_preview is not None:
+                    old_start, old_end = self._pressed_constraint_origin or (
+                        int(span.start_ordinal or 1),
+                        int(span.end_ordinal or span.start_ordinal or 1),
+                    )
+                    new_start, new_end = self._pressed_constraint_preview
+                    if (
+                        span.constraint_index is not None
+                        and span.constraint_key
+                        and (int(new_start), int(new_end)) != (int(old_start), int(old_end))
+                    ):
+                        self.constraintRangeUpdateRequested.emit(
+                            int(span.constraint_index),
+                            str(span.constraint_key),
+                            int(old_start),
+                            int(old_end),
+                            int(new_start),
+                            int(new_end),
+                            str(self._pressed_constraint_action or "move"),
+                        )
+                elif (
+                    span.constraint_key
+                    and span.start_ordinal is not None
+                    and span.end_ordinal is not None
+                ):
+                    self.constraintSpanClicked.emit(
+                        str(span.constraint_key),
+                        int(span.start_ordinal),
+                        int(span.end_ordinal),
+                    )
+            finally:
+                self._pressed_constraint_span = None
+                self._pressed_constraint_action = None
+                self._pressed_constraint_origin = None
+                self._pressed_constraint_preview = None
+                self._pressed_constraint_press_pos = None
+                self._pressed_constraint_drag_active = False
+                self._pressed_constraint_drag_offset = 0
+                self.update()
             event.accept()
             return
         if event.button() == Qt.LeftButton and self._pressed_event_marker is not None:
@@ -813,6 +1183,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
 
     def leaveEvent(self, event) -> None:  # noqa: N802
         self._update_trigger_add_cursor()
+        self._update_constraint_add_cursor()
         super().leaveEvent(event)
 
     def _emit_scrub_for_event(self, event: QMouseEvent) -> None:
@@ -882,6 +1253,11 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                 track_rect = self._track_rect_for_row(row_top, row_h)
                 if row.spans:
                     for span, rect in self._iter_span_rects(row, track_rect):
+                        if rect.adjusted(-4.0, -2.0, 4.0, 2.0).contains(x, y):
+                            if abs(float(x) - rect.left()) <= 6.0:
+                                return ("span_edge", (span, "start"))
+                            if abs(float(x) - rect.right()) <= 6.0:
+                                return ("span_edge", (span, "end"))
                         if rect.adjusted(-3.0, -2.0, 3.0, 2.0).contains(x, y):
                             return ("span", span)
                 if row.markers:
@@ -910,7 +1286,8 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def _update_trigger_add_cursor(self, y: float | None = None) -> None:
         try:
             if not self._trigger_add_armed:
-                self.unsetCursor()
+                if not self._constraint_add_armed:
+                    self.unsetCursor()
                 return
             row = self._row_at_y(float(y)) if y is not None else None
             if row is not None and row.title == "Triggers":
@@ -920,16 +1297,35 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         except Exception:
             pass
 
+    def _update_constraint_add_cursor(self, y: float | None = None) -> None:
+        try:
+            if not self._constraint_add_armed:
+                if not self._trigger_add_armed:
+                    self.unsetCursor()
+                return
+            row = self._row_at_y(float(y)) if y is not None else None
+            if row is not None and row.title == "Constraints":
+                self.setCursor(Qt.CrossCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
+        except Exception:
+            pass
+
     def _iter_span_rects(self, row: TimelineRow, track_rect: QRectF):
         _, lane_gap, lane_h, lanes_top = self._lane_metrics(row, track_rect)
         for span in row.spans:
-            x0 = self._x_for_s(span.start_s_m)
-            x1 = self._x_for_s(span.end_s_m)
+            start_s_m, end_s_m = self._span_display_bounds(span, row)
+            x0 = self._x_for_s(start_s_m)
+            x1 = self._x_for_s(end_s_m)
             if x1 < x0:
                 x0, x1 = x1, x0
-            center_x = (x0 + x1) / 2.0
-            width = max(8.0, x1 - x0)
-            left_x = center_x - (width / 2.0)
+            if abs(x1 - x0) < 1.0:
+                center_x = (x0 + x1) / 2.0
+                width = 8.0
+                left_x = center_x - (width / 2.0)
+            else:
+                width = max(1.0, x1 - x0)
+                left_x = x0
             lane_index = max(0, int(getattr(span, "lane", 0)))
             bar_y = lanes_top + lane_index * (lane_h + lane_gap)
             yield span, QRectF(left_x, bar_y, width, lane_h)
@@ -998,6 +1394,9 @@ class TimelineDock(QFrame):
     eventTriggerCreateRequested = Signal(float)
     eventTriggerMoveRequested = Signal(int, float)
     eventTriggerDeleteRequested = Signal(int)
+    constraintRangeCreateRequested = Signal(str, int, int)
+    constraintRangeUpdateRequested = Signal(int, str, int, int, int, int, str)
+    constraintRangeDeleteRequested = Signal(int, str, int, int)
 
     def __init__(self, path: Path | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1010,6 +1409,8 @@ class TimelineDock(QFrame):
         self._is_playing = False
         self._minimum_zoom_px_per_m = MIN_ZOOM_PX_PER_M
         self._trigger_add_armed = False
+        self._constraint_add_armed = False
+        self._constraint_create_key = str(RANGED_CONSTRAINT_KEYS[0])
         self._play_pause_btn: QPushButton
         self._playback_label: QLabel
         self._summary_label: QLabel
@@ -1172,6 +1573,7 @@ class TimelineDock(QFrame):
 
         self._rail_canvas = _TimelineRailCanvas()
         self._rail_canvas.triggerAddClicked.connect(self._toggle_trigger_add_armed)
+        self._rail_canvas.constraintAddClicked.connect(self._toggle_constraint_add_armed)
         self._rail_scroll.setWidget(self._rail_canvas)
         body_layout.addWidget(self._rail_scroll)
 
@@ -1195,6 +1597,12 @@ class TimelineDock(QFrame):
             self._on_event_trigger_create_requested
         )
         self._track_canvas.eventTriggerMoveRequested.connect(self.eventTriggerMoveRequested)
+        self._track_canvas.constraintRangeCreateRequested.connect(
+            self._on_constraint_range_create_requested
+        )
+        self._track_canvas.constraintRangeUpdateRequested.connect(
+            self.constraintRangeUpdateRequested
+        )
         self._track_canvas.deleteSelectionRequested.connect(self._on_delete_selection_requested)
         self._track_scroll.setWidget(self._track_canvas)
         self._track_scroll.setFocusProxy(self._track_canvas)
@@ -1207,6 +1615,7 @@ class TimelineDock(QFrame):
 
         self._on_zoom_changed(self._zoom_slider.value())
         self._apply_trigger_add_armed(False)
+        self._apply_constraint_add_armed(False)
 
     def eventFilter(self, watched, event):  # noqa: N802
         if event.type() == QEvent.Wheel and watched in {
@@ -1499,27 +1908,76 @@ class TimelineDock(QFrame):
         self._trigger_add_armed = bool(armed)
         self._rail_canvas.set_trigger_add_armed(self._trigger_add_armed)
         self._track_canvas.set_trigger_add_armed(self._trigger_add_armed)
+        if self._trigger_add_armed:
+            self._apply_constraint_add_armed(False)
+
+    def set_constraint_create_key(self, key: str) -> None:
+        if key not in RANGED_CONSTRAINT_KEYS:
+            return
+        self._constraint_create_key = str(key)
+        self._track_canvas.set_constraint_create_key(str(key))
+
+    def _toggle_constraint_add_armed(self) -> None:
+        self._apply_constraint_add_armed(not self._constraint_add_armed)
+
+    def _apply_constraint_add_armed(self, armed: bool) -> None:
+        self._constraint_add_armed = bool(armed)
+        self._rail_canvas.set_constraint_add_armed(self._constraint_add_armed)
+        self._track_canvas.set_constraint_add_armed(self._constraint_add_armed)
+        self._track_canvas.set_constraint_create_key(self._constraint_create_key)
+        if self._constraint_add_armed:
+            self._apply_trigger_add_armed(False)
 
     def _on_event_trigger_create_requested(self, time_s: float) -> None:
         self._apply_trigger_add_armed(False)
         self.eventTriggerCreateRequested.emit(float(time_s))
 
+    def _on_constraint_range_create_requested(
+        self,
+        key: str,
+        start_ordinal: int,
+        end_ordinal: int,
+    ) -> None:
+        self._apply_constraint_add_armed(False)
+        self.constraintRangeCreateRequested.emit(
+            str(key),
+            int(start_ordinal),
+            int(end_ordinal),
+        )
+
     def _on_delete_selection_requested(self) -> None:
-        if self._selection is None or self._selection.kind != "path":
+        if self._selection is None:
             return
-        index = self._selection.path_index
-        if index is None or self._path is None:
+        if self._selection.kind == "path":
+            index = self._selection.path_index
+            if index is None or self._path is None:
+                return
+            if index < 0 or index >= len(getattr(self._path, "path_elements", []) or []):
+                return
+            if isinstance(self._path.path_elements[index], EventTrigger):
+                self.eventTriggerDeleteRequested.emit(int(index))
             return
-        if index < 0 or index >= len(getattr(self._path, "path_elements", []) or []):
-            return
-        if isinstance(self._path.path_elements[index], EventTrigger):
-            self.eventTriggerDeleteRequested.emit(int(index))
+        if self._selection.kind == "constraint":
+            for row in self._projection.rows:
+                for span in row.spans:
+                    if not self._track_canvas._is_span_selected(span):
+                        continue
+                    if span.constraint_index is None or not span.constraint_key:
+                        return
+                    self.constraintRangeDeleteRequested.emit(
+                        int(span.constraint_index),
+                        str(span.constraint_key),
+                        int(span.start_ordinal or 1),
+                        int(span.end_ordinal or span.start_ordinal or 1),
+                    )
+                    return
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         key = event.key()
         modifiers = event.modifiers()
-        if key == Qt.Key_Escape and self._trigger_add_armed:
+        if key == Qt.Key_Escape and (self._trigger_add_armed or self._constraint_add_armed):
             self._apply_trigger_add_armed(False)
+            self._apply_constraint_add_armed(False)
             event.accept()
             return
         if modifiers & Qt.ControlModifier:
@@ -1662,6 +2120,14 @@ def _build_projection(
         path_elements,
         anchor_s_by_path_index,
     )
+    constraint_positions_by_key = {
+        key: _build_constraint_positions(path, key, path_elements, anchor_s_by_path_index)
+        for key in RANGED_CONSTRAINT_KEYS
+    }
+    constraint_display_ranges_by_key = {
+        key: _build_constraint_display_ranges(constraint_positions_by_key[key])
+        for key in RANGED_CONSTRAINT_KEYS
+    }
     rows.append(
         TimelineRow(
             title="Constraints",
@@ -1669,6 +2135,8 @@ def _build_projection(
             spans=constraint_spans,
             lane_count=_lane_count_for_spans(constraint_spans),
             constraint_keys=list(RANGED_CONSTRAINT_KEYS),
+            constraint_positions_by_key=constraint_positions_by_key,
+            constraint_display_ranges_by_key=constraint_display_ranges_by_key,
         )
     )
 
@@ -1795,10 +2263,8 @@ def _build_constraint_spans(
             domain_positions.append(0.0)
             continue
         domain_positions.append(_element_global_s(element_index, element, path_elements, anchor_s_by_path_index))
-    domain_boundaries = _build_domain_boundaries(domain_positions)
-
     spans: list[TimelineSpan] = []
-    for rc in getattr(path, "ranged_constraints", []) or []:
+    for rc_index, rc in enumerate(getattr(path, "ranged_constraints", []) or []):
         if getattr(rc, "key", "") != key:
             continue
         total = len(domain_positions)
@@ -1806,10 +2272,11 @@ def _build_constraint_spans(
             continue
         start_ord = max(1, min(int(getattr(rc, "start_ordinal", 1)), total))
         end_ord = max(start_ord, min(int(getattr(rc, "end_ordinal", start_ord)), total))
-        # Render spans as ordinal intervals (old SegmentBar-style), not point-to-point marks.
-        # This ensures even single-ordinal ranges have visible extent in timeline space.
-        start_s = domain_boundaries[start_ord - 1]
-        end_s = domain_boundaries[end_ord]
+        start_s, end_s = _constraint_display_range_from_positions(
+            domain_positions,
+            start_ord,
+            end_ord,
+        )
         unit = str(SPINNER_UNITS.get(key, "") or "")
         label = f"{float(getattr(rc, 'value', 0.0)):g}{unit}"
         spans.append(
@@ -1818,6 +2285,7 @@ def _build_constraint_spans(
                 end_s_m=float(end_s),
                 label=label,
                 color=_constraint_color(key),
+                constraint_index=rc_index,
                 constraint_key=key,
                 start_ordinal=start_ord,
                 end_ordinal=end_ord,
@@ -1827,6 +2295,221 @@ def _build_constraint_spans(
     spans.sort(key=lambda span: (span.start_s_m, span.end_s_m))
     _assign_span_lanes(spans)
     return spans
+
+
+def _build_constraint_positions(
+    path: Path,
+    key: str,
+    path_elements: list[object],
+    anchor_s_by_path_index: dict[int, float],
+) -> list[float]:
+    domain_elements = list(get_constraint_domain_elements(path, key))
+    if not domain_elements:
+        return []
+
+    element_index_by_identity = {id(element): index for index, element in enumerate(path_elements)}
+    domain_positions: list[float] = []
+    for element in domain_elements:
+        element_index = element_index_by_identity.get(id(element))
+        if element_index is None:
+            domain_positions.append(0.0)
+            continue
+        domain_positions.append(
+            _element_global_s(element_index, element, path_elements, anchor_s_by_path_index)
+        )
+    return domain_positions
+
+
+def _constraint_display_range_from_positions(
+    positions: list[float],
+    start_ordinal: int,
+    end_ordinal: int,
+) -> tuple[float, float]:
+    """Return the effective applied span for a ranged constraint.
+
+    Ranged constraints are selected by ordinal domain elements, but the path
+    segment they affect starts at the previous domain position when one exists.
+    This mirrors CanvasView.show_constraint_range_overlay().
+    """
+    if not positions:
+        return 0.0, 0.0
+    total = len(positions)
+    start = max(1, min(int(start_ordinal), total))
+    end = max(start, min(int(end_ordinal), total))
+    start_index = max(0, start - 2 if start > 1 else start - 1)
+    end_index = max(0, min(end - 1, total - 1))
+    return float(positions[start_index]), float(positions[end_index])
+
+
+def _constraint_move_range_for_s(
+    positions: list[float],
+    start_ordinal: int,
+    end_ordinal: int,
+    s_m: float,
+) -> tuple[int, int] | None:
+    """Return the move target whose applied range contains or is nearest ``s_m``."""
+    if not positions:
+        return None
+    total = len(positions)
+    start = max(1, min(int(start_ordinal), total))
+    end = max(start, min(int(end_ordinal), total))
+    ordinal_width = max(0, end - start)
+    max_start = max(1, total - ordinal_width)
+    target_s = float(s_m)
+    candidates: list[tuple[int, int, float, float]] = []
+    for candidate_start in range(1, max_start + 1):
+        candidate_end = min(total, candidate_start + ordinal_width)
+        display_start, display_end = _constraint_display_range_from_positions(
+            positions,
+            candidate_start,
+            candidate_end,
+        )
+        lo = min(display_start, display_end)
+        hi = max(display_start, display_end)
+        candidates.append((candidate_start, candidate_end, lo, hi))
+    if not candidates:
+        return None
+
+    epsilon = 1e-9
+    containing = [
+        candidate
+        for candidate in candidates
+        if candidate[2] - epsilon <= target_s <= candidate[3] + epsilon
+    ]
+    if containing:
+        best = min(
+            containing,
+            key=lambda candidate: (
+                candidate[3] - candidate[2],
+                abs(((candidate[2] + candidate[3]) / 2.0) - target_s),
+                candidate[0],
+            ),
+        )
+        return int(best[0]), int(best[1])
+
+    best = min(
+        candidates,
+        key=lambda candidate: (
+            min(abs(target_s - candidate[2]), abs(target_s - candidate[3])),
+            abs(((candidate[2] + candidate[3]) / 2.0) - target_s),
+            candidate[0],
+        ),
+    )
+    return int(best[0]), int(best[1])
+
+
+def _constraint_start_ordinal_for_s(
+    positions: list[float],
+    end_ordinal: int,
+    s_m: float,
+) -> int | None:
+    """Return the start ordinal whose displayed left edge is nearest ``s_m``."""
+    if not positions:
+        return None
+    total = len(positions)
+    end = max(1, min(int(end_ordinal), total))
+    target_s = float(s_m)
+    candidates: list[tuple[int, float]] = []
+    for candidate_start in range(1, end + 1):
+        display_start, _ = _constraint_display_range_from_positions(
+            positions,
+            candidate_start,
+            end,
+        )
+        candidates.append((candidate_start, float(display_start)))
+    if not candidates:
+        return None
+
+    best = min(
+        candidates,
+        key=lambda candidate: (
+            abs(target_s - candidate[1]),
+            -candidate[0],
+        ),
+    )
+    return int(best[0])
+
+
+def _constraint_end_ordinal_for_s(positions: list[float], s_m: float) -> int | None:
+    """Return the end ordinal whose displayed right edge is nearest ``s_m``."""
+    if not positions:
+        return None
+    total = len(positions)
+    if total <= 1:
+        return 1
+    target_s = float(s_m)
+    best_index = min(
+        range(total),
+        key=lambda index: (
+            abs(target_s - float(positions[index])),
+            index,
+        ),
+    )
+    return int(best_index + 1)
+
+
+def _constraint_creation_range_for_s(
+    positions: list[float],
+    anchor_s_m: float,
+    current_s_m: float,
+) -> tuple[int, int] | None:
+    """Convert a visual drag interval into ranged-constraint ordinals."""
+    if not positions:
+        return None
+    if len(positions) <= 1:
+        return 1, 1
+
+    anchor = float(anchor_s_m)
+    current = float(current_s_m)
+    if current >= anchor:
+        start_ordinal = _constraint_area_ordinal_for_s(positions, anchor, bias="right")
+        end_ordinal = _constraint_area_ordinal_for_s(positions, current, bias="left")
+    else:
+        start_ordinal = _constraint_area_ordinal_for_s(positions, current, bias="right")
+        end_ordinal = _constraint_area_ordinal_for_s(positions, anchor, bias="left")
+
+    if start_ordinal is None or end_ordinal is None:
+        return None
+    if start_ordinal > end_ordinal:
+        start_ordinal, end_ordinal = end_ordinal, start_ordinal
+    return int(start_ordinal), int(end_ordinal)
+
+
+def _constraint_area_ordinal_for_s(
+    positions: list[float],
+    s_m: float,
+    *,
+    bias: str,
+) -> int | None:
+    """Return the constraint ordinal for the potential segment area at ``s_m``."""
+    if not positions:
+        return None
+    total = len(positions)
+    if total <= 1:
+        return 1
+
+    target = float(s_m)
+    first = float(positions[0])
+    last = float(positions[-1])
+    if target <= first:
+        return 2
+    if target >= last:
+        return total
+
+    right_index = bisect.bisect_left(positions, target)
+    if right_index < total and math.isclose(target, float(positions[right_index]), abs_tol=1e-9):
+        if bias == "right":
+            return min(total, right_index + 2)
+        return max(2, right_index + 1)
+
+    return max(2, min(total, right_index + 1))
+
+
+def _build_constraint_display_ranges(positions: list[float]) -> list[tuple[float, float]]:
+    return [
+        _constraint_display_range_from_positions(positions, ordinal, ordinal)
+        for ordinal in range(1, len(positions) + 1)
+    ]
 
 
 def _build_combined_constraint_spans(
@@ -1914,7 +2597,7 @@ def _build_constraint_spans_from_positions(
         return []
 
     spans: list[TimelineSpan] = []
-    for rc in getattr(path, "ranged_constraints", []) or []:
+    for rc_index, rc in enumerate(getattr(path, "ranged_constraints", []) or []):
         if getattr(rc, "key", "") != key:
             continue
         total = len(domain_positions)
@@ -1922,13 +2605,11 @@ def _build_constraint_spans_from_positions(
             continue
         start_ord = max(1, min(int(getattr(rc, "start_ordinal", 1)), total))
         end_ord = max(start_ord, min(int(getattr(rc, "end_ordinal", start_ord)), total))
-        start_index = start_ord - 1
-        end_index = end_ord - 1
-        if start_index > 0:
-            start_s = float(domain_positions[start_index - 1])
-        else:
-            start_s = float(domain_positions[start_index])
-        end_s = float(domain_positions[end_index])
+        start_s, end_s = _constraint_display_range_from_positions(
+            domain_positions,
+            start_ord,
+            end_ord,
+        )
         unit = str(SPINNER_UNITS.get(key, "") or "")
         label = f"{float(getattr(rc, 'value', 0.0)):g}{unit}"
         spans.append(
@@ -1937,6 +2618,7 @@ def _build_constraint_spans_from_positions(
                 end_s_m=float(end_s),
                 label=label,
                 color=_constraint_color(key),
+                constraint_index=rc_index,
                 constraint_key=key,
                 start_ordinal=start_ord,
                 end_ordinal=end_ord,
@@ -1993,29 +2675,6 @@ def _lane_count_for_spans(spans: list[TimelineSpan]) -> int:
     if not spans:
         return 1
     return max(1, max(int(getattr(span, "lane", 0)) for span in spans) + 1)
-
-
-def _build_domain_boundaries(domain_positions: list[float]) -> list[float]:
-    """Build ordinal interval boundaries from ordinal center positions.
-
-    For N ordinals (center positions), returns N+1 boundaries:
-    - boundary[0] at first center
-    - boundary[N] at last center
-    - interior boundaries as midpoints between adjacent centers
-    """
-    if not domain_positions:
-        return [0.0]
-    if len(domain_positions) == 1:
-        pos = float(domain_positions[0])
-        return [pos, pos]
-
-    boundaries: list[float] = [float(domain_positions[0])]
-    for i in range(1, len(domain_positions)):
-        left = float(domain_positions[i - 1])
-        right = float(domain_positions[i])
-        boundaries.append((left + right) / 2.0)
-    boundaries.append(float(domain_positions[-1]))
-    return boundaries
 
 
 def _constraint_color(key: str) -> str:
@@ -2109,10 +2768,25 @@ def _map_projection_distance_to_time(
             marker.s_m = float(mapped if mapped is not None else mapper(source_s))
         constraint_keys = _constraint_row_keys(row)
         if constraint_keys:
+            row.constraint_positions_by_key = {}
+            row.constraint_display_ranges_by_key = {}
+            path_elements = list(getattr(path, "path_elements", []) or [])
+            for key in constraint_keys:
+                positions = _constraint_domain_axis_positions(
+                    path,
+                    key,
+                    path_elements,
+                    mapper=mapper,
+                    sim_index=sim_index,
+                )
+                row.constraint_positions_by_key[str(key)] = positions
+                row.constraint_display_ranges_by_key[str(key)] = _build_constraint_display_ranges(
+                    positions
+                )
             row.spans = _build_combined_constraint_spans_for_axis(
                 path,
                 constraint_keys,
-                list(getattr(path, "path_elements", []) or []),
+                path_elements,
                 mapper=mapper,
                 sim_index=sim_index,
             )

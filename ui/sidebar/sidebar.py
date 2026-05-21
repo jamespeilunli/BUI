@@ -26,7 +26,13 @@ from models.path_model import (
 from ui.qt_compat import Qt, QSizePolicy
 
 from .components import ConstraintManager, ElementManager, PropertyEditor
-from .utils import ELEMENT_LABEL_TO_TYPE, ELEMENT_TYPE_LABELS, ElementType, SPINNER_METADATA
+from .utils import (
+    ELEMENT_LABEL_TO_TYPE,
+    ELEMENT_TYPE_LABELS,
+    ElementType,
+    RANGED_CONSTRAINT_KEYS,
+    SPINNER_METADATA,
+)
 from .widgets import NoWheelDoubleSpinBox
 
 
@@ -42,6 +48,7 @@ class Sidebar(QWidget):
 
     constraintRangePreviewRequested = Signal(str, int, int)
     constraintRangePreviewCleared = Signal()
+    constraintTypeChanged = Signal(str)
 
     popoutOpened = Signal()
     popoutClosed = Signal()
@@ -60,6 +67,7 @@ class Sidebar(QWidget):
         self._selected_index: Optional[int] = None
         self._selected_element_identity: Optional[int] = None
         self._selected_constraint_ref: Optional[tuple[str, int, int]] = None
+        self._active_constraint_key: str = str(RANGED_CONSTRAINT_KEYS[0])
         self._last_emitted_selected_index: Optional[int] = None
         self._suppress_element_selected_emit_once: bool = False
 
@@ -193,9 +201,18 @@ class Sidebar(QWidget):
         constraint_layout.setContentsMargins(8, 0, 8, 0)
         constraint_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
+        self.constraint_type_combo = QComboBox()
+        self.constraint_type_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._constraint_type_key_by_label: dict[str, str] = {}
+        for key in RANGED_CONSTRAINT_KEYS:
+            label = self._constraint_label_for_key(str(key))
+            self._constraint_type_key_by_label[label] = str(key)
+            self.constraint_type_combo.addItem(label)
+        self.constraint_type_combo.currentTextChanged.connect(self.on_constraint_type_change)
+        constraint_layout.addRow("Type", self.constraint_type_combo)
+
         self.constraint_value_spin = NoWheelDoubleSpinBox()
         self.constraint_value_spin.setMinimumWidth(96)
-        self.constraint_value_spin.setMaximumWidth(120)
         self.constraint_value_spin.setDecimals(3)
         self.constraint_value_spin.setKeyboardTracking(False)
         self.constraint_value_spin.valueChanged.connect(self.on_constraint_value_changed)
@@ -275,6 +292,41 @@ class Sidebar(QWidget):
             ):
                 return rc
         return None
+
+    def get_active_constraint_key(self) -> str:
+        return str(self._active_constraint_key or RANGED_CONSTRAINT_KEYS[0])
+
+    def _constraint_label_for_key(self, key: str) -> str:
+        meta = SPINNER_METADATA.get(str(key), {})
+        return str(meta.get("label", key)).replace("<br/>", " ")
+
+    def _set_constraint_type_combo_key(self, key: str) -> None:
+        label = self._constraint_label_for_key(str(key))
+        try:
+            self.constraint_type_combo.blockSignals(True)
+            idx = self.constraint_type_combo.findText(label)
+            if idx >= 0:
+                self.constraint_type_combo.setCurrentIndex(idx)
+        finally:
+            self.constraint_type_combo.blockSignals(False)
+
+    def _constraint_type_change_is_valid(
+        self,
+        constraint: RangedConstraint,
+        new_key: str,
+        new_start: int,
+        new_end: int,
+    ) -> bool:
+        if self.path is None:
+            return False
+        for other in getattr(self.path, "ranged_constraints", []) or []:
+            if other is constraint or getattr(other, "key", None) != new_key:
+                continue
+            other_start = int(getattr(other, "start_ordinal", 1))
+            other_end = int(getattr(other, "end_ordinal", other_start))
+            if new_start <= other_end and new_end >= other_start:
+                return False
+        return True
 
     def set_path(self, path: Path) -> None:
         self.path = path
@@ -382,8 +434,8 @@ class Sidebar(QWidget):
 
     def _show_constraint(self, constraint: RangedConstraint) -> None:
         key = str(getattr(constraint, "key", ""))
-        meta = SPINNER_METADATA.get(key, {})
-        label = str(meta.get("label", key)).replace("<br/>", " ")
+        self._active_constraint_key = key or self.get_active_constraint_key()
+        self._set_constraint_type_combo_key(self._active_constraint_key)
 
         self.property_editor.hide_all_properties()
         self.type_row.setVisible(False)
@@ -392,7 +444,7 @@ class Sidebar(QWidget):
         self.form_container.setVisible(True)
         self.title_bar.setVisible(True)
         self.empty_state.setVisible(False)
-        self.title_label.setText(label)
+        self.title_label.setText("Constraint")
 
         self._configure_constraint_spinbox(key)
         try:
@@ -400,6 +452,48 @@ class Sidebar(QWidget):
             self.constraint_value_spin.setValue(float(getattr(constraint, "value", 0.0)))
         finally:
             self.constraint_value_spin.blockSignals(False)
+
+    def on_constraint_type_change(self, label: str) -> None:
+        new_key = self._constraint_type_key_by_label.get(str(label))
+        if not new_key:
+            return
+
+        old_active_key = self.get_active_constraint_key()
+        self._active_constraint_key = str(new_key)
+        self.constraintTypeChanged.emit(str(new_key))
+
+        constraint = self._selected_constraint()
+        if constraint is None:
+            return
+
+        old_key = str(getattr(constraint, "key", ""))
+        if old_key == new_key:
+            return
+
+        _domain, count = self.constraint_manager.get_domain_info_for_key(str(new_key))
+        total = max(1, int(count))
+        new_start = max(1, min(int(getattr(constraint, "start_ordinal", 1)), total))
+        new_end = max(new_start, min(int(getattr(constraint, "end_ordinal", new_start)), total))
+        if not self._constraint_type_change_is_valid(constraint, str(new_key), new_start, new_end):
+            self._active_constraint_key = old_active_key
+            self._set_constraint_type_combo_key(old_key)
+            self.constraintTypeChanged.emit(old_active_key)
+            return
+
+        desc = f"Change Constraint Type: {self._constraint_label_for_key(str(new_key))}"
+        self.aboutToChange.emit(desc)
+        constraint.key = str(new_key)
+        constraint.start_ordinal = int(new_start)
+        constraint.end_ordinal = int(new_end)
+        try:
+            setattr(self.path.constraints, str(new_key), None)
+        except Exception:
+            pass
+        self._selected_constraint_ref = (str(new_key), int(new_start), int(new_end))
+        self._configure_constraint_spinbox(str(new_key))
+        self.modelChanged.emit()
+        self.constraintRangePreviewRequested.emit(str(new_key), int(new_start), int(new_end))
+        self.userActionOccurred.emit(desc)
 
     def update_current_values_only(self) -> None:
         idx = self.get_selected_index()
