@@ -2,26 +2,30 @@
 
 This document holds deferred enhancements and optional follow-up work for the redesign.
 
-These items are intentionally kept out of [tasks.md](/home/jamesli/git_repos/BLine-GUI/tasks.md) so the implementation plan stays focused on the smallest useful release.
+These items are intentionally kept out of [tasks.md](tasks.md) so the implementation plan stays focused on the smallest useful release.
 
 ## Deferred UX Features
 
-- playback-driven timeline behavior beyond a simple inspection playhead
-- estimated-time overlays or alternate time-based timeline views
+- alternate distance/progress timeline views layered on top of the default time axis
 - semantic trigger categories or multiple trigger lane families
 - multi-selection and batch edits
 - minimap or overview strip for dense projects
 - advanced keyboard workflow beyond core delete and focus actions
 - richer motion and visual polish
-- structure reordering from the timeline
 
-## Deferred Constraint Features
+## Wontfix For Current Rewrite Wave
 
 - split constraint spans
 - merge adjacent compatible spans
 - duplicate constraint spans
+- duplicate event triggers
+
+These are not required for current parity work. Revisit only after path structure authoring, structure reordering, flat path constraints, and timeline delete parity are complete.
+
+## Deferred Constraint Polish
+
 - more advanced snapping rules if the minimal version is not sufficient
-- more advanced lane management if simple automatic stacking is not sufficient
+- more advanced combined-row lane management if simple automatic stacking is not sufficient
 
 ## Deferred Timeline Polish
 

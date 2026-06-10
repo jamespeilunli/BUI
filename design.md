@@ -64,7 +64,7 @@ The redesign should show more information than the current sidebar-driven editin
 
 ### 4. Direct manipulation first
 
-The user should be able to move, resize, reorder, split, and inspect timeline items directly from the timeline whenever that is the natural interaction. The sidebar should refine a selection, not replace direct editing.
+The user should be able to move, resize, reorder, and inspect timeline items directly from the timeline whenever that is the natural interaction. The sidebar should refine a selection, not replace direct editing.
 
 ### 5. Fast to learn, faster to master
 
@@ -115,12 +115,13 @@ No second inspector should appear elsewhere.
 
 The timeline should represent path progress in a left-to-right sequence. Users should feel that moving right means moving later through the path.
 
-The timeline does not need to imply literal clock time unless the app has enough information to show it meaningfully. It should, at minimum, communicate sequence and span clearly. If timing is shown, it should help the user without making the timeline dependent on perfect simulation data.
+The timeline should use estimated elapsed time as its primary horizontal axis. Timing should come from the app's best available simulation/projection data and remain stable enough for editing; when simulation data is limited, fallback timing should still preserve left-to-right path progression.
 
 The timeline should support multiple useful readings of the same path:
 
 - structural order
-- relative position along the path
+- estimated time through the path
+- relative position along the path as supporting context
 - active ranges for constraints
 - discrete trigger points
 - selected context around the current edit
@@ -159,15 +160,15 @@ Ranged constraints should appear as span-based clips or bars on stackable tracks
 - understand overlapping constraints without ambiguity
 - compare multiple constraint types in the same region
 - visually identify the currently active constraint for a selected part of the path
-- add, extend, shorten, split, and remove ranges directly from the timeline
+- add, extend, shorten, move, and remove ranges directly from the timeline
 
-Constraint tracks should feel organized and intentional, not like a compressed data grid.
+Constraint tracks should use one combined constraints row with automatic stacking. Different constraint types should remain distinguishable through labels, color, and selected/hover states, but the first timeline release should not split them into separate visible groups.
 
 ### Optional grouping behavior
 
-Constraint tracks should be visually grouped by type so users can scan them quickly. Event trigger tracks should remain visually distinct from constraint tracks.
+Constraint spans may be visually differentiated by type so users can scan them quickly. Event trigger tracks should remain visually distinct from the combined constraints row.
 
-Users should be able to collapse groups when they want a simpler overview and expand them when they need precision.
+Users may collapse expandable track groups such as triggers when they want a simpler overview. The combined constraints row should stay compact through lane stacking rather than splitting into separate collapsible type groups.
 
 ## Zoom and Navigation
 
@@ -207,9 +208,6 @@ Users should be able to:
 - drag items left or right to reposition them in sequence
 - drag range edges to adjust where a constraint starts and ends
 - create new constraints by dragging across a region
-- duplicate or repeat applicable items quickly
-- split a range into smaller ranges
-- merge adjacent ranges when appropriate
 - snap edits to meaningful boundaries when precision is needed
 - make fine adjustments without fighting the interface
 

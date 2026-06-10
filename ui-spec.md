@@ -2,7 +2,7 @@
 
 ## Scope
 
-This document turns the redesign goals in [design.md](/home/jamesli/git_repos/BLine-GUI/design.md) into a concrete product spec for the new path editing interface.
+This document turns the redesign goals in [design.md](design.md) into a concrete product spec for the new path editing interface.
 
 This is still a UX specification, not an implementation plan. It defines screen regions, behaviors, states, and interaction expectations so the redesign can be built coherently.
 
@@ -66,7 +66,7 @@ Content:
 - playhead/scrubber
 - path structure track
 - event trigger tracks
-- constraint track groups
+- one combined constraints row
 - overview/minimap strip if needed
 
 ### 3. Property Sidebar
@@ -145,25 +145,26 @@ Each should have:
 
 ## Horizontal Axis
 
-The timeline’s horizontal axis should represent progression through the path from start to finish.
+The timeline’s horizontal axis should represent estimated elapsed time through the path from start to finish.
 
 At minimum the axis must support:
 
 - sequence order
-- relative position along the path
-
-Optionally the axis may also reflect:
-
 - estimated time
+- relative position along the path as supporting context
+
+Optionally the axis may also expose:
+
 - distance along path
+- relative progress
 
-If multiple interpretations are available, the default should remain the one that is easiest to understand and most stable during editing.
+If multiple interpretations are available, the default should remain estimated time because it matches playback, scrubbing, and a video-editor mental model.
 
-For the first release, the default horizontal scale is relative path progress derived from geometric distance along the current path.
+For the first release, the default horizontal scale is estimated time derived from the current simulation/projection data.
 
-This choice should drive item placement, ruler math, snapping, zoom, and fit-to-view behavior because it is stable under editing and can represent anchors, waypoints, rotation targets, event triggers, and ranged constraints without depending on simulation output.
+This choice should drive item placement, ruler math, snapping, zoom, playback, scrubbing, and fit-to-view behavior. When simulation output is unavailable or incomplete, fallback timing may be derived from path distance and configured/default velocity, but the displayed axis should still read as time.
 
-Estimated time may be shown later as a secondary readout or alternate view, but it should not be the primary axis in the first implementation wave.
+Distance or relative-progress views are alternate/future modes, not the default first-release timeline.
 
 ## Vertical Axis
 
@@ -176,8 +177,7 @@ Recommended top-to-bottom order:
 1. ruler and playhead zone
 2. path structure track
 3. event trigger group
-4. translation constraint group
-5. rotation constraint group
+4. combined constraints row
 
 Within each group, visible stacking should prevent overlaps from becoming unreadable.
 
@@ -318,7 +318,6 @@ Users should be able to:
 - create a trigger at the current playhead or clicked location
 - drag a trigger left or right
 - select one of many nearby triggers reliably
-- duplicate a trigger when useful
 - delete a trigger without affecting adjacent items
 - inspect trigger details in the sidebar
 
@@ -339,45 +338,34 @@ Collapsed state should still show:
 - selected trigger context
 - approximate trigger positions
 
-## Constraint Groups
+## Combined Constraints Row
 
-Constraints should be organized as stacked clip-style spans in grouped tracks.
+Constraints should be organized as stacked clip-style spans in one combined constraints row.
 
-Constraint group examples:
-
-- translation speed
-- translation acceleration
-- rotation speed
-- rotation acceleration
-
-Users should be able to treat each group like a clean, focused lane family rather than a single overloaded strip.
-
-For the first release, all four constraint groups should be visible in the header rail by default:
+The combined row includes these ranged constraint types:
 
 - translation speed
 - translation acceleration
 - rotation speed
 - rotation acceleration
 
-Default expansion behavior:
+Users should be able to compare different constraint types in one place without scanning multiple separated groups.
 
-- groups with one or more ranges start expanded
-- empty groups start collapsed to a compact header-plus-add state
+For the first release, the header rail should show a single constraints row with one add-range affordance. The active add type may be selected from the sidebar inspector or another compact control, but the timeline should not show four separate constraint groups.
 
-This keeps existing projects legible on open while avoiding unnecessary empty vertical space in new or simple paths.
+This keeps the timeline visually simple and avoids turning the bottom workspace into a stacked settings panel.
 
 ## Constraint Track Structure
 
-Each constraint type should have:
+The combined constraints row should have:
 
-- a group header
-- one or more visible lanes
+- a single row header
+- one or more automatic lanes
 - an add-range affordance
-- a collapse/expand control
 
-Each lane should support multiple non-overlapping ranges of the same type when needed.
+Each lane should support multiple non-overlapping spans when needed.
 
-If overlapping ranges of the same type are allowed conceptually, the UI must place them on separate lanes automatically to avoid visual ambiguity.
+If spans overlap visually, the UI must place them on separate lanes automatically to avoid ambiguity. Different constraint types may overlap in time and should still be visually distinguishable.
 
 ## Constraint Span Representation
 
@@ -400,14 +388,11 @@ The user should be able to distinguish:
 
 Users should be able to:
 
-- create a new constraint by dragging across empty space in a group
+- create a new constraint by dragging across empty space in the combined constraints row
 - select an existing span
 - drag a span left or right when valid
 - resize the start edge
 - resize the end edge
-- split a span
-- merge compatible adjacent spans
-- duplicate a span
 - delete a span
 - edit exact values in the sidebar
 
@@ -558,11 +543,12 @@ The interface should expose easy ways to:
 
 The user should be able to:
 
-1. find the relevant constraint group
-2. click or drag in empty space to create a new span
-3. see the new span appear immediately
-4. have the new span selected automatically
-5. refine the exact value in the sidebar
+1. find the combined constraints row
+2. choose the constraint type to add
+3. click or drag in empty space in the combined constraints row to create a new span
+4. see the new span appear immediately
+5. have the new span selected automatically
+6. refine the exact value in the sidebar
 
 The flow should avoid popout dialogs.
 
@@ -647,9 +633,6 @@ Timeline items should offer concise, predictable context actions.
 Examples:
 
 - rename
-- duplicate
-- split
-- merge
 - delete
 - zoom to item
 - reveal on field
@@ -706,7 +689,7 @@ The timeline should explain:
 
 ### No Constraints Yet
 
-A constraint group should make it obvious that:
+The combined constraints row should make it obvious that:
 
 - no ranges exist yet
 - the user can create one directly in the lane
@@ -765,25 +748,24 @@ The UI spec is satisfied when the redesign supports the following behaviors clea
 The first release includes:
 
 - the three-region layout with a substantial bottom timeline dock
-- relative-distance-based timeline projection
+- estimated-time-based timeline projection
 - path structure visibility
 - one shared event trigger group with stacked lanes
-- visible constraint groups with direct ranged-constraint editing
+- one combined constraints row with direct ranged-constraint editing
 - zoom, scroll, fit-all, and center-on-selection behavior
 - single-selection synchronization across canvas, timeline, and sidebar
 - direct event trigger placement and repositioning from the timeline
-- basic expand/collapse behavior for trigger and constraint groups
+- basic event trigger stacking
 - the right sidebar as the sole detailed property editor
 
 The first release explicitly excludes:
 
-- playback-driven timeline behavior beyond a simple inspection playhead
-- estimated-time as the primary timeline axis
+- distance/progress as the primary timeline axis
 - semantic trigger categories or multiple trigger group families
 - multi-selection and batch timeline edits
 - minimap or overview-strip requirements
 - rich animation polish beyond lightweight orientation feedback
-- large-scale structure reordering behaviors whose model semantics are not already safe and clear
+- multi-item or bulk structure reordering behaviors whose model semantics are not already safe and clear
 
 These exclusions are deliberate so the implementation can ship the core editing workflow first without expanding into a second wave of interaction design.
 
@@ -791,7 +773,7 @@ These exclusions are deliberate so the implementation can ship the core editing 
 
 Future design passes may still evaluate:
 
-- an alternate estimated-time readout or view layered on top of the default progress axis
+- alternate distance/progress readouts layered on top of the default time axis
 - semantic trigger grouping if the model gains stable trigger categories
 - a minimap or overview strip for very dense projects
 - multi-selection once single-item interactions are proven stable
