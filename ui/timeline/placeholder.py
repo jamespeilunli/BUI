@@ -419,6 +419,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._pressed_constraint_action: str | None = None
         self._pressed_constraint_origin: tuple[int, int] | None = None
         self._pressed_constraint_preview: tuple[int, int] | None = None
+        self._pressed_constraint_preview_valid = True
         self._pressed_constraint_press_pos: tuple[float, float] | None = None
         self._pressed_constraint_drag_active = False
         self._pressed_constraint_drag_offset = 0
@@ -426,6 +427,8 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._creating_constraint_start: int | None = None
         self._creating_constraint_anchor_s_m: float | None = None
         self._creating_constraint_preview: tuple[int, int] | None = None
+        self._creating_constraint_preview_valid = True
+        self._hover_hit: tuple[str, object] | None = None
         self.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -443,6 +446,10 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def set_constraint_create_key(self, key: str) -> None:
         if key in RANGED_CONSTRAINT_KEYS:
             self._constraint_create_key = str(key)
+
+    def set_projection(self, projection: TimelineProjection) -> None:
+        self._hover_hit = None
+        super().set_projection(projection)
 
     def set_zoom_px_per_m(self, zoom_px_per_m: int) -> None:
         self._zoom_px_per_m = max(MIN_ZOOM_PX_PER_M, min(MAX_ZOOM_PX_PER_M, int(zoom_px_per_m)))
@@ -701,25 +708,47 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             if self._is_span_selected(span):
                 fill = QColor(color.lighter(118))
                 fill.setAlpha(245)
+            elif self._is_span_hovered(span):
+                fill = QColor(color.lighter(108))
+                fill.setAlpha(238)
+            if self._pressed_constraint_span is span and not self._pressed_constraint_preview_valid:
+                fill = QColor("#8a3f46")
+                fill.setAlpha(180)
 
             pen_color = color.lighter(120)
             pen_width = 1.1
             if self._is_span_selected(span):
                 pen_color = QColor("#f4f7fa")
                 pen_width = 1.5
+            elif self._is_span_hovered(span):
+                pen_color = QColor("#d9e2ec")
+                pen_width = 1.35
+            if self._pressed_constraint_span is span and not self._pressed_constraint_preview_valid:
+                pen_color = QColor("#ff8c92")
+                pen_width = 1.4
             painter.setPen(QPen(pen_color, pen_width))
             painter.setBrush(fill)
             painter.drawRect(rect)
 
-            if self._is_span_selected(span) or self._pressed_constraint_span is span:
+            if (
+                self._is_span_selected(span)
+                or self._pressed_constraint_span is span
+                or self._is_span_hovered(span)
+            ):
                 handle_w = min(6.0, max(3.0, rect.width() / 3.0))
+                handle_color = QColor("#f4f7fa")
+                if self._hover_span_edge(span, "start"):
+                    handle_color = QColor("#ffffff")
                 painter.fillRect(
                     QRectF(rect.left(), rect.top(), handle_w, rect.height()),
-                    QColor("#f4f7fa"),
+                    handle_color,
                 )
+                handle_color = QColor("#f4f7fa")
+                if self._hover_span_edge(span, "end"):
+                    handle_color = QColor("#ffffff")
                 painter.fillRect(
                     QRectF(rect.right() - handle_w, rect.top(), handle_w, rect.height()),
-                    QColor("#f4f7fa"),
+                    handle_color,
                 )
 
             text_rect = QRectF(rect.left() + 5, rect.top(), rect.width() - 10, rect.height())
@@ -733,6 +762,31 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                     span.label,
                 )
                 painter.restore()
+
+        if (
+            self._pressed_constraint_span is not None
+            and self._pressed_constraint_preview is not None
+            and self._pressed_constraint_span.constraint_key
+        ):
+            positions = row.constraint_positions_by_key.get(
+                str(self._pressed_constraint_span.constraint_key),
+                [],
+            )
+            if positions:
+                start_ord, end_ord = self._pressed_constraint_preview
+                start_s, end_s = _constraint_display_range_from_positions(
+                    list(positions),
+                    start_ord,
+                    end_ord,
+                )
+                self._draw_constraint_guides(
+                    painter,
+                    start_s,
+                    end_s,
+                    lanes_top - 2.0,
+                    lanes_top + lanes_block_h + 2.0,
+                    self._pressed_constraint_preview_valid,
+                )
 
         if (
             self._creating_constraint_key
@@ -756,11 +810,43 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                     x0 = center_x - 4.0
                     x1 = center_x + 4.0
                 preview_rect = QRectF(x0, lanes_top, max(1.0, x1 - x0), lane_h)
-                color = QColor(_constraint_color(self._creating_constraint_key))
-                color.setAlpha(120)
-                painter.setPen(QPen(QColor("#e8eef5"), 1.2, Qt.DashLine))
+                if self._creating_constraint_preview_valid:
+                    color = QColor(_constraint_color(self._creating_constraint_key))
+                    color.setAlpha(120)
+                    pen_color = QColor("#e8eef5")
+                else:
+                    color = QColor("#8a3f46")
+                    color.setAlpha(110)
+                    pen_color = QColor("#ff8c92")
+                painter.setPen(QPen(pen_color, 1.2, Qt.DashLine))
                 painter.setBrush(color)
                 painter.drawRect(preview_rect)
+                self._draw_constraint_guides(
+                    painter,
+                    start_s,
+                    end_s,
+                    lanes_top - 2.0,
+                    lanes_top + lanes_block_h + 2.0,
+                    self._creating_constraint_preview_valid,
+                )
+
+    def _draw_constraint_guides(
+        self,
+        painter: QPainter,
+        start_s_m: float,
+        end_s_m: float,
+        top: float,
+        bottom: float,
+        valid: bool,
+    ) -> None:
+        painter.save()
+        color = QColor("#e8eef5" if valid else "#ff8c92")
+        color.setAlpha(210 if valid else 235)
+        painter.setPen(QPen(color, 1.0, Qt.DashLine))
+        for s_m in {float(start_s_m), float(end_s_m)}:
+            x = self._x_for_s(s_m)
+            painter.drawLine(_qpointf(x, top), _qpointf(x, bottom))
+        painter.restore()
 
     def _span_display_bounds(self, span: TimelineSpan, row: TimelineRow) -> tuple[float, float]:
         if (
@@ -861,14 +947,14 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             if move_range is None:
                 return
             new_start, new_end = move_range
-        if self._constraint_range_available(
+        self._pressed_constraint_preview = (int(new_start), int(new_end))
+        self._pressed_constraint_preview_valid = self._constraint_range_available(
             row,
             str(span.constraint_key),
             int(new_start),
             int(new_end),
             ignore_index=span.constraint_index,
-        ):
-            self._pressed_constraint_preview = (int(new_start), int(new_end))
+        )
 
     def _draw_playhead(self, painter: QPainter) -> None:
         x = self._x_for_s(self._playhead_s_m)
@@ -910,12 +996,14 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._pressed_constraint_action = None
         self._pressed_constraint_origin = None
         self._pressed_constraint_preview = None
+        self._pressed_constraint_preview_valid = True
         self._pressed_constraint_press_pos = None
         self._pressed_constraint_drag_active = False
         self._creating_constraint_key = None
         self._creating_constraint_start = None
         self._creating_constraint_anchor_s_m = None
         self._creating_constraint_preview = None
+        self._creating_constraint_preview_valid = True
         self._pressed_on_playhead = self._is_playhead_click(event)
         pressed_row = self._row_at_y(float(event.position().y()))
         if self._trigger_add_armed and pressed_row is not None and pressed_row.title == "Triggers":
@@ -941,13 +1029,14 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                 self._creating_constraint_start = int(preview[0])
                 self._creating_constraint_anchor_s_m = float(anchor_s_m)
                 self._constraint_add_press_consumed = True
-                if self._constraint_range_available(
+                self._creating_constraint_preview = (int(preview[0]), int(preview[1]))
+                self._creating_constraint_preview_valid = self._constraint_range_available(
                     pressed_row,
                     self._constraint_create_key,
                     int(preview[0]),
                     int(preview[1]),
-                ):
-                    self._creating_constraint_preview = (int(preview[0]), int(preview[1]))
+                )
+                self.update()
                 event.accept()
                 return
         if self._pressed_hit is not None:
@@ -962,10 +1051,12 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                 if isinstance(span, TimelineSpan):
                     self._pressed_constraint_span = span
                     self._pressed_constraint_action = action
+                    self._hover_hit = None
                     start_ord = int(span.start_ordinal or 1)
                     end_ord = int(span.end_ordinal or start_ord)
                     self._pressed_constraint_origin = (start_ord, end_ord)
                     self._pressed_constraint_preview = (start_ord, end_ord)
+                    self._pressed_constraint_preview_valid = True
                     self._pressed_constraint_press_pos = (
                         float(event.position().x()),
                         float(event.position().y()),
@@ -975,6 +1066,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                         click_ord = self._ordinal_for_x(row, str(span.constraint_key), float(event.position().x()))
                         if click_ord is not None:
                             self._pressed_constraint_drag_offset = int(click_ord) - start_ord
+                    self._apply_constraint_drag_cursor()
                     event.accept()
                     return
             if (
@@ -1002,6 +1094,14 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         self._update_trigger_add_cursor(float(event.position().y()))
         self._update_constraint_add_cursor(float(event.position().y()))
+        if not (
+            self._trigger_add_armed
+            or self._constraint_add_armed
+            or self._pressed_constraint_span is not None
+            or self._pressed_event_marker is not None
+            or self._scrub_active
+        ):
+            self._update_hover_feedback(float(event.position().x()), float(event.position().y()))
         if self._trigger_add_press_consumed:
             event.accept()
             return
@@ -1020,15 +1120,13 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                 )
                 if preview is not None:
                     start, end = preview
-                    if self._constraint_range_available(
+                    self._creating_constraint_preview = (int(start), int(end))
+                    self._creating_constraint_preview_valid = self._constraint_range_available(
                         row,
                         self._creating_constraint_key,
                         start,
                         end,
-                    ):
-                        self._creating_constraint_preview = (start, end)
-                    else:
-                        self._creating_constraint_preview = None
+                    )
                     self.update()
             event.accept()
             return
@@ -1040,6 +1138,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                 if (dx * dx) + (dy * dy) >= 9.0:
                     self._pressed_constraint_drag_active = True
             if self._pressed_constraint_drag_active:
+                self._apply_constraint_drag_cursor()
                 self._update_constraint_drag_preview(float(event.position().x()))
                 self.update()
             event.accept()
@@ -1073,7 +1172,11 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             return
         if event.button() == Qt.LeftButton and self._constraint_add_press_consumed:
             try:
-                if self._creating_constraint_key and self._creating_constraint_preview is not None:
+                if (
+                    self._creating_constraint_key
+                    and self._creating_constraint_preview is not None
+                    and self._creating_constraint_preview_valid
+                ):
                     start_ord, end_ord = self._creating_constraint_preview
                     self.constraintRangeCreateRequested.emit(
                         str(self._creating_constraint_key),
@@ -1086,16 +1189,25 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                 self._creating_constraint_start = None
                 self._creating_constraint_anchor_s_m = None
                 self._creating_constraint_preview = None
+                self._creating_constraint_preview_valid = True
                 self._pressed_hit = None
                 self._pressed_on_playhead = False
                 self._empty_press_scrubbed = False
+                if self._constraint_add_armed:
+                    self._update_constraint_add_cursor(float(event.position().y()))
+                else:
+                    self._update_hover_feedback(float(event.position().x()), float(event.position().y()))
                 self.update()
             event.accept()
             return
         if event.button() == Qt.LeftButton and self._pressed_constraint_span is not None:
             try:
                 span = self._pressed_constraint_span
-                if self._pressed_constraint_drag_active and self._pressed_constraint_preview is not None:
+                if (
+                    self._pressed_constraint_drag_active
+                    and self._pressed_constraint_preview is not None
+                    and self._pressed_constraint_preview_valid
+                ):
                     old_start, old_end = self._pressed_constraint_origin or (
                         int(span.start_ordinal or 1),
                         int(span.end_ordinal or span.start_ordinal or 1),
@@ -1130,9 +1242,11 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                 self._pressed_constraint_action = None
                 self._pressed_constraint_origin = None
                 self._pressed_constraint_preview = None
+                self._pressed_constraint_preview_valid = True
                 self._pressed_constraint_press_pos = None
                 self._pressed_constraint_drag_active = False
                 self._pressed_constraint_drag_offset = 0
+                self._update_hover_feedback(float(event.position().x()), float(event.position().y()))
                 self.update()
             event.accept()
             return
@@ -1184,6 +1298,10 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def leaveEvent(self, event) -> None:  # noqa: N802
         self._update_trigger_add_cursor()
         self._update_constraint_add_cursor()
+        self._hover_hit = None
+        self.unsetCursor()
+        self.setToolTip("")
+        self.update()
         super().leaveEvent(event)
 
     def _emit_scrub_for_event(self, event: QMouseEvent) -> None:
@@ -1306,10 +1424,74 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             row = self._row_at_y(float(y)) if y is not None else None
             if row is not None and row.title == "Constraints":
                 self.setCursor(Qt.CrossCursor)
+                self.setToolTip(
+                    f"Drag to create {_constraint_key_label(self._constraint_create_key)}"
+                )
             else:
                 self.setCursor(Qt.ArrowCursor)
+                self.setToolTip("")
         except Exception:
             pass
+
+    def _apply_constraint_drag_cursor(self) -> None:
+        action = self._pressed_constraint_action or "move"
+        if action in {"resize_start", "resize_end"}:
+            self.setCursor(Qt.SizeHorCursor)
+        else:
+            self.setCursor(Qt.ClosedHandCursor)
+
+    def _update_hover_feedback(self, x: float, y: float) -> None:
+        hit = self._hit_test(float(x), float(y))
+        if hit is not None and hit[0] not in {"span", "span_edge"}:
+            hit = None
+        changed = not self._same_hit(self._hover_hit, hit)
+        self._hover_hit = hit
+
+        if hit is None:
+            self.unsetCursor()
+            self.setToolTip("")
+        else:
+            kind, payload = hit
+            if kind == "span_edge":
+                span, side = payload
+                self.setCursor(Qt.SizeHorCursor)
+                verb = "Resize start" if side == "start" else "Resize end"
+                self.setToolTip(f"{verb} - {self._constraint_span_tooltip(span)}")
+            elif kind == "span":
+                self.setCursor(Qt.OpenHandCursor)
+                self.setToolTip(f"Move - {self._constraint_span_tooltip(payload)}")
+            else:
+                self.unsetCursor()
+                self.setToolTip("")
+
+        if changed:
+            self.update()
+
+    def _same_hit(
+        self,
+        left: tuple[str, object] | None,
+        right: tuple[str, object] | None,
+    ) -> bool:
+        if left is None or right is None:
+            return left is right
+        if left[0] != right[0]:
+            return False
+        if left[0] == "span_edge":
+            left_span, left_side = left[1]
+            right_span, right_side = right[1]
+            return left_span is right_span and left_side == right_side
+        return left[1] is right[1]
+
+    def _constraint_span_tooltip(self, span: TimelineSpan) -> str:
+        key = str(span.constraint_key or "")
+        label = _constraint_key_label(key)
+        value = str(span.label or "").strip()
+        start = int(span.start_ordinal or 1)
+        end = int(span.end_ordinal or start)
+        range_text = f"{start}" if start == end else f"{start}-{end}"
+        if value:
+            return f"{label} {value}, range {range_text}"
+        return f"{label}, range {range_text}"
 
     def _iter_span_rects(self, row: TimelineRow, track_rect: QRectF):
         _, lane_gap, lane_h, lanes_top = self._lane_metrics(row, track_rect)
@@ -1349,6 +1531,24 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             and span.start_ordinal == self._selection.start_ordinal
             and span.end_ordinal == self._selection.end_ordinal
         )
+
+    def _is_span_hovered(self, span: TimelineSpan) -> bool:
+        hit = self._hover_hit
+        if hit is None:
+            return False
+        if hit[0] == "span":
+            return hit[1] is span
+        if hit[0] == "span_edge":
+            hovered_span, _side = hit[1]
+            return hovered_span is span
+        return False
+
+    def _hover_span_edge(self, span: TimelineSpan, side: str) -> bool:
+        hit = self._hover_hit
+        if hit is None or hit[0] != "span_edge":
+            return False
+        hovered_span, hovered_side = hit[1]
+        return hovered_span is span and str(hovered_side) == str(side)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         key = event.key()
@@ -2684,6 +2884,12 @@ def _constraint_color(key: str) -> str:
         "max_velocity_deg_per_sec": "#f59e7f",
         "max_acceleration_deg_per_sec2": "#d184ff",
     }.get(key, "#6f94b7")
+
+
+def _constraint_key_label(key: str) -> str:
+    meta = SPINNER_METADATA.get(str(key), {})
+    label = _plain_label(str(meta.get("label", key)))
+    return label or str(key)
 
 
 def _plain_label(label: str) -> str:
