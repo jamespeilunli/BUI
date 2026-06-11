@@ -214,8 +214,8 @@ class MainWindow(WindowEventMixin, QMainWindow):
             self._on_timeline_event_trigger_move_requested,
             Qt.QueuedConnection,
         )
-        self.timeline.eventTriggerDeleteRequested.connect(
-            self._on_timeline_event_trigger_delete_requested,
+        self.timeline.pathItemDeleteRequested.connect(
+            self._on_timeline_path_item_delete_requested,
             Qt.QueuedConnection,
         )
         self.sidebar.constraintTypeChanged.connect(
@@ -392,7 +392,22 @@ class MainWindow(WindowEventMixin, QMainWindow):
         # Record undo snapshot before deletion
         old_state = copy.deepcopy(self.path)
         self.sidebar._on_remove_element(idx)
+        self.sidebar.clear_selection()
+        self.timeline.clear_selection()
+        self.canvas.clear_selection()
         self._record_path_change("Delete element", old_state)
+
+    def _on_timeline_path_item_delete_requested(self, index: int) -> None:
+        if getattr(self, "_layout_stabilizing", False):
+            return
+        try:
+            index = int(index)
+            if index < 0 or index >= len(self.path.path_elements):
+                return
+        except Exception:
+            return
+        self._select_path_index_across_views(index, center_canvas=False)
+        self._delete_selected_element()
 
     def _on_timeline_structure_item_create_requested(
         self,
@@ -586,29 +601,6 @@ class MainWindow(WindowEventMixin, QMainWindow):
                 "Move EventTrigger",
                 old_state,
                 suppress_first_refresh=not structure_changed,
-                restore_index_on_undo=index,
-            )
-
-    def _on_timeline_event_trigger_delete_requested(self, index: int) -> None:
-        if getattr(self, "_layout_stabilizing", False):
-            return
-        if index < 0 or index >= len(self.path.path_elements):
-            return
-        if not isinstance(self.path.path_elements[index], EventTrigger):
-            return
-
-        old_state = copy.deepcopy(self.path)
-        self.path.path_elements.pop(index)
-        self.sidebar.clear_selection()
-        self.timeline.clear_selection()
-        self.canvas.clear_selection()
-        self._refresh_after_undo_redo(selected_index=None)
-
-        if self._has_path_changed_since(old_state):
-            self._record_path_change(
-                "Delete EventTrigger",
-                old_state,
-                suppress_first_refresh=True,
                 restore_index_on_undo=index,
             )
 

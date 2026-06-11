@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import math
 
-from models.path_model import Path, RangedConstraint, TranslationTarget
+import pytest
+
+from models.path_model import (
+    EventTrigger,
+    Path,
+    RangedConstraint,
+    RotationTarget,
+    TranslationTarget,
+    Waypoint,
+)
 from ui.timeline.placeholder import (
     TimelineDock,
     _build_projection,
@@ -181,6 +190,46 @@ def test_invalid_constraint_drag_preview_is_kept_for_feedback(qt_app):
 
     assert canvas._pressed_constraint_preview == (3, 3)
     assert not canvas._pressed_constraint_preview_valid
+
+
+@pytest.mark.parametrize("path_index", [0, 1, 2, 3])
+def test_timeline_path_selection_delete_emits_generic_path_delete(qt_app, path_index):
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            Waypoint(
+                translation_target=TranslationTarget(2.0, 0.0),
+                rotation_target=RotationTarget(rotation_radians=0.2, t_ratio=0.0),
+            ),
+            RotationTarget(rotation_radians=0.5, t_ratio=0.4),
+            EventTrigger(t_ratio=0.6, lib_key="score"),
+            TranslationTarget(4.0, 0.0),
+        ],
+    )
+    dock = TimelineDock(path)
+    path_deletes: list[int] = []
+    dock.pathItemDeleteRequested.connect(path_deletes.append)
+
+    dock.select_path_index(path_index)
+    dock._on_delete_selection_requested()
+
+    assert path_deletes == [path_index]
+
+
+def test_timeline_constraint_selection_delete_keeps_range_delete_route(qt_app):
+    dock = TimelineDock(_path_with_constraints())
+    path_deletes: list[int] = []
+    constraint_deletes: list[tuple[int, str, int, int]] = []
+    dock.pathItemDeleteRequested.connect(path_deletes.append)
+    dock.constraintRangeDeleteRequested.connect(
+        lambda index, key, start, end: constraint_deletes.append((index, key, start, end))
+    )
+
+    dock.select_constraint_range("max_acceleration_meters_per_sec2", 2, 3)
+    dock._on_delete_selection_requested()
+
+    assert path_deletes == []
+    assert constraint_deletes == [(1, "max_acceleration_meters_per_sec2", 2, 3)]
 
 
 def test_structure_translation_placement_interpolates_between_anchors():

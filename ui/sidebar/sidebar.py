@@ -647,13 +647,7 @@ class Sidebar(QWidget):
         old_elements = self.path.path_elements[:]
         self.element_manager.remove_element(idx_to_remove)
         remap_ranged_constraints(self.path, old_elements)
-
-        if self.path.path_elements:
-            self._selected_index = min(idx_to_remove, len(self.path.path_elements) - 1)
-            self._last_selected_index = self._selected_index
-            self.refresh_current_selection()
-        else:
-            self.clear_selection()
+        self.clear_selection()
 
     def _get_entity_name(self, element) -> str:
         if isinstance(element, Waypoint):

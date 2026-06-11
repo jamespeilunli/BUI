@@ -1774,10 +1774,10 @@ class TimelineDock(QFrame):
     pathItemSelected = Signal(int)
     constraintRangeSelected = Signal(str, int, int)
     selectionCleared = Signal()
+    pathItemDeleteRequested = Signal(int)
     structureItemCreateRequested = Signal(str, float)
     eventTriggerCreateRequested = Signal(float)
     eventTriggerMoveRequested = Signal(int, float)
-    eventTriggerDeleteRequested = Signal(int)
     constraintRangeCreateRequested = Signal(str, int, int)
     constraintRangeUpdateRequested = Signal(int, str, int, int, int, int, str)
     constraintRangeDeleteRequested = Signal(int, str, int, int)
@@ -2403,8 +2403,7 @@ class TimelineDock(QFrame):
                 return
             if index < 0 or index >= len(getattr(self._path, "path_elements", []) or []):
                 return
-            if isinstance(self._path.path_elements[index], EventTrigger):
-                self.eventTriggerDeleteRequested.emit(int(index))
+            self.pathItemDeleteRequested.emit(int(index))
             return
         if self._selection.kind == "constraint":
             for row in self._projection.rows:
