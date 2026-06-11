@@ -138,12 +138,12 @@ Objective:
 
 Tasks:
 
-- [ ] Provide a clear way to add Translation, Waypoint, Rotation, and Event Trigger items from the redesigned timeline/canvas workflow
-- [ ] Ensure new Translation and Waypoint items appear immediately in the structure track and on the field
-- [ ] Ensure new Rotation and Event Trigger items are inserted between valid neighboring anchors and cannot be placed at invalid path ends
-- [ ] Preserve the existing behavior where new items use sensible default positions and project/config defaults
-- [ ] Select the newly created item across timeline, canvas, and sidebar
-- [ ] Preserve undo/redo and autosave for each add operation
+- [x] Provide a clear way to add Translation, Waypoint, Rotation, and Event Trigger items from the redesigned timeline/canvas workflow
+- [x] Ensure new Translation and Waypoint items appear immediately in the structure track and on the field
+- [x] Ensure new Rotation and Event Trigger items are inserted between valid neighboring anchors and cannot be placed at invalid path ends
+- [x] Preserve the existing behavior where new items use sensible default positions and project/config defaults
+- [x] Select the newly created item across timeline, canvas, and sidebar
+- [x] Preserve undo/redo and autosave for each add operation
 
 Exit criteria:
 
