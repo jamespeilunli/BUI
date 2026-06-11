@@ -29,7 +29,8 @@ import os
 import copy
 
 from ..sidebar import Sidebar
-from ..sidebar.utils import RANGED_CONSTRAINT_KEYS, clamp_from_metadata
+from ..sidebar.utils import ElementType, RANGED_CONSTRAINT_KEYS, clamp_from_metadata
+from models.ordinal_remap import remap_ranged_constraints
 from models.path_model import (
     EventTrigger,
     Path,
@@ -40,7 +41,10 @@ from models.path_model import (
 )
 from ..canvas import CanvasView, FIELD_LENGTH_METERS, FIELD_WIDTH_METERS
 from ..timeline import TimelinePlaceholder
-from ..timeline.placeholder import resolve_trigger_placement_for_time
+from ..timeline.placeholder import (
+    resolve_structure_placement_for_time,
+    resolve_trigger_placement_for_time,
+)
 from typing import Tuple, Optional
 from utils.project_manager import ProjectManager
 from utils.undo_system import UndoRedoManager, PathCommand, ConfigCommand
@@ -196,6 +200,10 @@ class MainWindow(WindowEventMixin, QMainWindow):
         )
         self.timeline.constraintRangeSelected.connect(
             lambda key, s, e: self.canvas.set_constraint_segment_highlight(key, s, e),
+            Qt.QueuedConnection,
+        )
+        self.timeline.structureItemCreateRequested.connect(
+            self._on_timeline_structure_item_create_requested,
             Qt.QueuedConnection,
         )
         self.timeline.eventTriggerCreateRequested.connect(
@@ -385,6 +393,133 @@ class MainWindow(WindowEventMixin, QMainWindow):
         old_state = copy.deepcopy(self.path)
         self.sidebar._on_remove_element(idx)
         self._record_path_change("Delete element", old_state)
+
+    def _on_timeline_structure_item_create_requested(
+        self,
+        element_type: str,
+        time_s: float,
+    ) -> None:
+        if getattr(self, "_layout_stabilizing", False):
+            return
+
+        element_type = str(element_type)
+        element_kind_by_value = {
+            ElementType.TRANSLATION.value: ElementType.TRANSLATION,
+            ElementType.WAYPOINT.value: ElementType.WAYPOINT,
+            ElementType.ROTATION.value: ElementType.ROTATION,
+        }
+        element_kind = element_kind_by_value.get(element_type)
+        if element_kind is None:
+            return
+
+        placement = resolve_structure_placement_for_time(
+            self.path,
+            self._timeline_config(),
+            float(time_s),
+            element_type,
+        )
+        if placement is None:
+            return
+
+        old_state = copy.deepcopy(self.path)
+        old_elements = list(getattr(self.path, "path_elements", []) or [])
+        old_selected = self.sidebar.get_selected_index()
+        manager = self.sidebar.element_manager
+
+        new_element = None
+        if element_kind in (ElementType.TRANSLATION, ElementType.WAYPOINT):
+            if placement.x_m is None or placement.y_m is None:
+                base_x, base_y = manager._get_default_position_for_new_element(old_selected)
+            else:
+                base_x, base_y = float(placement.x_m), float(placement.y_m)
+            x_m, y_m = manager.propose_non_overlapping_position(base_x, base_y, element_kind)
+            if element_kind == ElementType.TRANSLATION:
+                new_element = manager.create_translation_target(x_meters=x_m, y_meters=y_m)
+            else:
+                new_element = manager.create_waypoint(
+                    x_meters=x_m,
+                    y_meters=y_m,
+                    intermediate_handoff_radius_meters=None,
+                    rotation_radians=0.0,
+                    t_ratio=0.0,
+                    profiled_rotation=True,
+                )
+        elif element_kind == ElementType.ROTATION:
+            if placement.t_ratio is None:
+                return
+            new_element = RotationTarget(
+                rotation_radians=0.0,
+                t_ratio=float(placement.t_ratio),
+                profiled_rotation=True,
+            )
+
+        if new_element is None:
+            return
+
+        insert_index = max(0, min(int(placement.insert_index), len(self.path.path_elements)))
+        self.path.path_elements.insert(insert_index, new_element)
+        remap_ranged_constraints(self.path, old_elements)
+        structure_changed = bool(self.sidebar._check_and_swap_rotation_targets())
+        new_identity = id(new_element)
+        new_index = next(
+            (
+                i
+                for i, element in enumerate(self.path.path_elements)
+                if id(element) == new_identity
+            ),
+            insert_index,
+        )
+
+        self._refresh_after_undo_redo(selected_index=new_index)
+        self._select_path_index_across_views(new_index, center_canvas=False)
+        QTimer.singleShot(
+            0,
+            lambda idx=new_index: self._select_path_index_across_views(
+                idx,
+                center_canvas=False,
+            ),
+        )
+
+        if self._has_path_changed_since(old_state):
+            self._record_path_change(
+                f"Add {self._timeline_structure_type_label(element_kind)}",
+                old_state,
+                suppress_first_refresh=not structure_changed,
+                restore_index_on_undo=old_selected,
+            )
+
+    def _timeline_structure_type_label(self, element_type: ElementType) -> str:
+        if element_type == ElementType.TRANSLATION:
+            return "Translation"
+        if element_type == ElementType.WAYPOINT:
+            return "Waypoint"
+        if element_type == ElementType.ROTATION:
+            return "Rotation"
+        return "Element"
+
+    def _select_path_index_across_views(
+        self,
+        index: int,
+        *,
+        center_canvas: bool = False,
+    ) -> None:
+        try:
+            if index is None or index < 0 or index >= len(self.path.path_elements):
+                return
+        except Exception:
+            return
+        try:
+            self.sidebar.select_index(index, propagate_to_canvas=False, defer=False)
+        except Exception:
+            pass
+        try:
+            self.canvas.select_index(index, center_on_item=center_canvas)
+        except Exception:
+            pass
+        try:
+            self.timeline.select_path_index(index)
+        except Exception:
+            pass
 
     def _on_timeline_event_trigger_create_requested(self, time_s: float) -> None:
         if getattr(self, "_layout_stabilizing", False):

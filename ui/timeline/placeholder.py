@@ -9,11 +9,12 @@ import re
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import QEvent, QRectF, QSize, Signal, QTimer
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSlider,
@@ -61,6 +62,12 @@ TIMELINE_STRUCTURE_TRANSLATION_COLOR = "#3aa3ff"
 TIMELINE_STRUCTURE_WAYPOINT_COLOR = "#ff7f3a"
 TIMELINE_STRUCTURE_ROTATION_COLOR = "#50c878"
 TIMELINE_TRIGGER_COLOR = "#ffd54d"
+STRUCTURE_ADD_TYPES = ("translation", "waypoint", "rotation")
+STRUCTURE_ADD_LABELS = {
+    "translation": "Translation",
+    "waypoint": "Waypoint",
+    "rotation": "Rotation",
+}
 
 
 @dataclass
@@ -133,6 +140,14 @@ class _SimTimeIndex:
 class TriggerPlacement:
     insert_index: int
     t_ratio: float
+
+
+@dataclass
+class StructurePlacement:
+    insert_index: int
+    x_m: float | None = None
+    y_m: float | None = None
+    t_ratio: float | None = None
 
 
 def _row_height_for(row: TimelineRow) -> int:
@@ -298,14 +313,20 @@ class _TimelineCanvasBase(QWidget):
 
 
 class _TimelineRailCanvas(_TimelineCanvasBase):
+    structureAddClicked = Signal()
     triggerAddClicked = Signal()
     constraintAddClicked = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.MinimumExpanding)
+        self._structure_add_armed = False
         self._trigger_add_armed = False
         self._constraint_add_armed = False
+
+    def set_structure_add_armed(self, armed: bool) -> None:
+        self._structure_add_armed = bool(armed)
+        self.update()
 
     def set_trigger_add_armed(self, armed: bool) -> None:
         self._trigger_add_armed = bool(armed)
@@ -336,7 +357,9 @@ class _TimelineRailCanvas(_TimelineCanvasBase):
         fm = painter.fontMetrics()
         text_y = int(y + (row_height + fm.ascent() - fm.descent()) / 2.0)
         painter.drawText(14, text_y, row.title)
-        if row.title == "Triggers":
+        if row.title == "Structure":
+            self._draw_add_button(painter, y, row_height, self._structure_add_armed)
+        elif row.title == "Triggers":
             self._draw_add_button(painter, y, row_height, self._trigger_add_armed)
         elif row.title == "Constraints":
             self._draw_add_button(painter, y, row_height, self._constraint_add_armed)
@@ -367,10 +390,12 @@ class _TimelineRailCanvas(_TimelineCanvasBase):
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() == Qt.LeftButton:
             for row, (row_top, row_h) in zip(self._projection.rows, self._row_layout()):
-                if row.title not in {"Triggers", "Constraints"}:
+                if row.title not in {"Structure", "Triggers", "Constraints"}:
                     continue
                 if self._add_button_rect(row_top, row_h).contains(event.position()):
-                    if row.title == "Triggers":
+                    if row.title == "Structure":
+                        self.structureAddClicked.emit()
+                    elif row.title == "Triggers":
                         self.triggerAddClicked.emit()
                     else:
                         self.constraintAddClicked.emit()
@@ -387,12 +412,14 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     pathItemClicked = Signal(int)
     constraintSpanClicked = Signal(str, int, int)
     emptyAreaClicked = Signal()
+    structureItemCreateRequested = Signal(str, float)
     eventTriggerCreateRequested = Signal(float)
     eventTriggerMoveRequested = Signal(int, float)
     constraintRangeCreateRequested = Signal(str, int, int)
     constraintRangeUpdateRequested = Signal(int, str, int, int, int, int, str)
     constraintRangeDeleteRequested = Signal(int, str, int, int)
     deleteSelectionRequested = Signal()
+    addModeCancelRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -410,6 +437,11 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._pressed_event_marker_drag_s_m = 0.0
         self._pressed_event_marker_drag_active = False
         self._pressed_event_marker_press_pos: tuple[float, float] | None = None
+        self._structure_add_armed = False
+        self._structure_add_type = "translation"
+        self._structure_add_hover_s_m: float | None = None
+        self._structure_add_hover_valid = True
+        self._structure_add_press_consumed = False
         self._trigger_add_armed = False
         self._trigger_add_press_consumed = False
         self._constraint_add_armed = False
@@ -432,6 +464,22 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
+        self._path_context: Path | None = None
+        self._config_context: dict[str, object] = {}
+
+    def set_path_context(self, path: Path | None, config: dict[str, object] | None) -> None:
+        self._path_context = path
+        self._config_context = dict(config or {})
+
+    def set_structure_add_armed(self, armed: bool, element_type: str | None = None) -> None:
+        self._structure_add_armed = bool(armed)
+        if element_type in STRUCTURE_ADD_TYPES:
+            self._structure_add_type = str(element_type)
+        if not self._structure_add_armed:
+            self._structure_add_hover_s_m = None
+            self._structure_add_hover_valid = True
+        self._update_structure_add_cursor()
+        self.update()
 
     def set_trigger_add_armed(self, armed: bool) -> None:
         self._trigger_add_armed = bool(armed)
@@ -449,6 +497,8 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
 
     def set_projection(self, projection: TimelineProjection) -> None:
         self._hover_hit = None
+        self._structure_add_hover_s_m = None
+        self._structure_add_hover_valid = True
         super().set_projection(projection)
 
     def set_zoom_px_per_m(self, zoom_px_per_m: int) -> None:
@@ -551,6 +601,8 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             return
         if row.markers:
             self._draw_markers(painter, row, track_rect)
+            if row.title == "Structure":
+                self._draw_structure_add_preview(painter, row, track_rect)
             return
 
         painter.setPen(QColor("#6f7882"))
@@ -559,6 +611,14 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             int(track_rect.center().y() + 5),
             row.empty_text,
         )
+        if row.title == "Structure":
+            center_y = track_rect.center().y()
+            painter.setPen(QPen(QColor("#3b4148"), 1))
+            painter.drawLine(
+                _qpointf(track_rect.left(), center_y),
+                _qpointf(track_rect.right(), center_y),
+            )
+            self._draw_structure_add_preview(painter, row, track_rect)
 
     def _has_constraint_create_preview(self, row: TimelineRow) -> bool:
         return bool(
@@ -668,6 +728,53 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                     TIMELINE_MARKER_SIZE,
                 )
             )
+        painter.restore()
+
+    def _draw_structure_add_preview(
+        self, painter: QPainter, row: TimelineRow, track_rect: QRectF
+    ) -> None:
+        if (
+            not self._structure_add_armed
+            or row.title != "Structure"
+            or self._structure_add_hover_s_m is None
+        ):
+            return
+
+        x = self._x_for_s(float(self._structure_add_hover_s_m))
+        center_y = track_rect.center().y()
+        valid = bool(self._structure_add_hover_valid)
+        element_type = str(self._structure_add_type)
+        color = QColor(
+            {
+                "translation": TIMELINE_STRUCTURE_TRANSLATION_COLOR,
+                "waypoint": TIMELINE_STRUCTURE_WAYPOINT_COLOR,
+                "rotation": TIMELINE_STRUCTURE_ROTATION_COLOR,
+            }.get(element_type, TIMELINE_STRUCTURE_TRANSLATION_COLOR)
+        )
+        if not valid:
+            color = QColor("#d06a6a")
+
+        painter.save()
+        painter.setOpacity(0.68 if valid else 0.56)
+        guide_pen = QPen(color, 1.4, Qt.DashLine)
+        painter.setPen(guide_pen)
+        painter.drawLine(
+            _qpointf(x, track_rect.top() + 1.0),
+            _qpointf(x, track_rect.bottom() - 1.0),
+        )
+        self._draw_marker_shape(painter, element_type, x, center_y, color)
+        painter.setOpacity(1.0)
+
+        label = STRUCTURE_ADD_LABELS.get(element_type, "Structure")
+        if not valid:
+            label = f"{label} unavailable"
+        metrics = painter.fontMetrics()
+        label_x = min(
+            max(track_rect.left(), x + 8.0),
+            max(track_rect.left(), track_rect.right() - metrics.horizontalAdvance(label) - 4.0),
+        )
+        painter.setPen(QColor("#f0f4f8") if valid else QColor("#ffb7b7"))
+        painter.drawText(int(label_x), int(track_rect.top()) + 10, label)
         painter.restore()
 
     def _draw_spans(self, painter: QPainter, row: TimelineRow, track_rect: QRectF) -> None:
@@ -990,6 +1097,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._pressed_event_marker_drag_active = False
         self._empty_press_scrubbed = False
         self._scrub_moved = False
+        self._structure_add_press_consumed = False
         self._trigger_add_press_consumed = False
         self._constraint_add_press_consumed = False
         self._pressed_constraint_span = None
@@ -1006,6 +1114,17 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._creating_constraint_preview_valid = True
         self._pressed_on_playhead = self._is_playhead_click(event)
         pressed_row = self._row_at_y(float(event.position().y()))
+        if self._structure_add_armed:
+            if pressed_row is not None and pressed_row.title == "Structure":
+                target_s = self._s_for_x(float(event.position().x()))
+                if self._structure_add_is_valid(target_s):
+                    self.structureItemCreateRequested.emit(
+                        str(self._structure_add_type),
+                        float(target_s),
+                    )
+                self._structure_add_press_consumed = True
+            event.accept()
+            return
         if self._trigger_add_armed and pressed_row is not None and pressed_row.title == "Triggers":
             self.eventTriggerCreateRequested.emit(self._s_for_x(float(event.position().x())))
             self._trigger_add_press_consumed = True
@@ -1092,10 +1211,12 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        self._update_structure_add_cursor(float(event.position().y()), float(event.position().x()))
         self._update_trigger_add_cursor(float(event.position().y()))
         self._update_constraint_add_cursor(float(event.position().y()))
         if not (
-            self._trigger_add_armed
+            self._structure_add_armed
+            or self._trigger_add_armed
             or self._constraint_add_armed
             or self._pressed_constraint_span is not None
             or self._pressed_event_marker is not None
@@ -1163,6 +1284,13 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.LeftButton and self._structure_add_press_consumed:
+            self._structure_add_press_consumed = False
+            self._pressed_hit = None
+            self._pressed_on_playhead = False
+            self._empty_press_scrubbed = False
+            event.accept()
+            return
         if event.button() == Qt.LeftButton and self._trigger_add_press_consumed:
             self._trigger_add_press_consumed = False
             self._pressed_hit = None
@@ -1296,6 +1424,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         event.accept()
 
     def leaveEvent(self, event) -> None:  # noqa: N802
+        self._update_structure_add_cursor()
         self._update_trigger_add_cursor()
         self._update_constraint_add_cursor()
         self._hover_hit = None
@@ -1401,10 +1530,58 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                 return row
         return None
 
+    def _structure_add_is_valid(self, s_m: float) -> bool:
+        if self._structure_add_type != "rotation":
+            return True
+        return (
+            resolve_structure_placement_for_time(
+                self._path_context or Path(),
+                self._config_context,
+                float(s_m),
+                self._structure_add_type,
+            )
+            is not None
+        )
+
+    def _update_structure_add_cursor(
+        self,
+        y: float | None = None,
+        x: float | None = None,
+    ) -> None:
+        try:
+            if not self._structure_add_armed:
+                if not self._trigger_add_armed and not self._constraint_add_armed:
+                    self.unsetCursor()
+                self._structure_add_hover_s_m = None
+                self._structure_add_hover_valid = True
+                return
+
+            row = self._row_at_y(float(y)) if y is not None else None
+            if row is not None and row.title == "Structure":
+                hover_s = self._s_for_x(float(x)) if x is not None else self._structure_add_hover_s_m
+                if hover_s is not None:
+                    self._structure_add_hover_s_m = float(hover_s)
+                    self._structure_add_hover_valid = self._structure_add_is_valid(float(hover_s))
+                self.setCursor(Qt.CrossCursor if self._structure_add_hover_valid else Qt.ForbiddenCursor)
+                label = STRUCTURE_ADD_LABELS.get(self._structure_add_type, "Structure")
+                self.setToolTip(
+                    f"Click to add {label}"
+                    if self._structure_add_hover_valid
+                    else f"{label} needs a valid segment between anchors"
+                )
+            else:
+                self._structure_add_hover_s_m = None
+                self._structure_add_hover_valid = True
+                self.setCursor(Qt.ArrowCursor)
+                self.setToolTip("")
+            self.update()
+        except Exception:
+            pass
+
     def _update_trigger_add_cursor(self, y: float | None = None) -> None:
         try:
             if not self._trigger_add_armed:
-                if not self._constraint_add_armed:
+                if not self._structure_add_armed and not self._constraint_add_armed:
                     self.unsetCursor()
                 return
             row = self._row_at_y(float(y)) if y is not None else None
@@ -1418,7 +1595,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def _update_constraint_add_cursor(self, y: float | None = None) -> None:
         try:
             if not self._constraint_add_armed:
-                if not self._trigger_add_armed:
+                if not self._structure_add_armed and not self._trigger_add_armed:
                     self.unsetCursor()
                 return
             row = self._row_at_y(float(y)) if y is not None else None
@@ -1553,6 +1730,12 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def keyPressEvent(self, event) -> None:  # noqa: N802
         key = event.key()
         modifiers = event.modifiers()
+        if key == Qt.Key_Escape and (
+            self._structure_add_armed or self._trigger_add_armed or self._constraint_add_armed
+        ):
+            self.addModeCancelRequested.emit()
+            event.accept()
+            return
         if key in (Qt.Key_Delete, Qt.Key_Backspace):
             self.deleteSelectionRequested.emit()
             event.accept()
@@ -1591,6 +1774,7 @@ class TimelineDock(QFrame):
     pathItemSelected = Signal(int)
     constraintRangeSelected = Signal(str, int, int)
     selectionCleared = Signal()
+    structureItemCreateRequested = Signal(str, float)
     eventTriggerCreateRequested = Signal(float)
     eventTriggerMoveRequested = Signal(int, float)
     eventTriggerDeleteRequested = Signal(int)
@@ -1608,6 +1792,8 @@ class TimelineDock(QFrame):
         self._total_time_s = 0.0
         self._is_playing = False
         self._minimum_zoom_px_per_m = MIN_ZOOM_PX_PER_M
+        self._structure_add_armed = False
+        self._structure_add_type = "translation"
         self._trigger_add_armed = False
         self._constraint_add_armed = False
         self._constraint_create_key = str(RANGED_CONSTRAINT_KEYS[0])
@@ -1772,6 +1958,7 @@ class TimelineDock(QFrame):
         self._rail_scroll.viewport().installEventFilter(self)
 
         self._rail_canvas = _TimelineRailCanvas()
+        self._rail_canvas.structureAddClicked.connect(self._show_structure_add_menu)
         self._rail_canvas.triggerAddClicked.connect(self._toggle_trigger_add_armed)
         self._rail_canvas.constraintAddClicked.connect(self._toggle_constraint_add_armed)
         self._rail_scroll.setWidget(self._rail_canvas)
@@ -1793,6 +1980,9 @@ class TimelineDock(QFrame):
         self._track_canvas.constraintSpanClicked.connect(self.select_constraint_range)
         self._track_canvas.constraintSpanClicked.connect(self.constraintRangeSelected)
         self._track_canvas.emptyAreaClicked.connect(self._on_empty_area_clicked)
+        self._track_canvas.structureItemCreateRequested.connect(
+            self._on_structure_item_create_requested
+        )
         self._track_canvas.eventTriggerCreateRequested.connect(
             self._on_event_trigger_create_requested
         )
@@ -1804,6 +1994,7 @@ class TimelineDock(QFrame):
             self.constraintRangeUpdateRequested
         )
         self._track_canvas.deleteSelectionRequested.connect(self._on_delete_selection_requested)
+        self._track_canvas.addModeCancelRequested.connect(self._clear_add_modes)
         self._track_scroll.setWidget(self._track_canvas)
         self._track_scroll.setFocusProxy(self._track_canvas)
         body_layout.addWidget(self._track_scroll, 1)
@@ -1814,6 +2005,7 @@ class TimelineDock(QFrame):
         )
 
         self._on_zoom_changed(self._zoom_slider.value())
+        self._apply_structure_add_armed(False)
         self._apply_trigger_add_armed(False)
         self._apply_constraint_add_armed(False)
 
@@ -1849,6 +2041,7 @@ class TimelineDock(QFrame):
         self._projection = _build_projection(self._path, self._config, use_sim_time=True)
         self._summary_label.setText(self._projection.summary_text)
         self._rail_canvas.set_projection(self._projection)
+        self._track_canvas.set_path_context(self._path, self._config)
         self._track_canvas.set_projection(self._projection)
         self._restore_selection()
         self._track_canvas.set_playhead(self._current_time_s, self._is_playing)
@@ -2101,6 +2294,60 @@ class TimelineDock(QFrame):
         self.clear_selection()
         self.selectionCleared.emit()
 
+    def _show_structure_add_menu(self) -> None:
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            """
+            QMenu {
+                background: #202326;
+                color: #eef2f6;
+                border: 1px solid #3b424a;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 5px 18px 5px 10px;
+            }
+            QMenu::item:selected {
+                background: #304155;
+            }
+            """
+        )
+        for element_type in STRUCTURE_ADD_TYPES:
+            action = menu.addAction(STRUCTURE_ADD_LABELS[element_type])
+            action.triggered.connect(
+                lambda checked=False, item_type=element_type: self._apply_structure_add_armed(
+                    True,
+                    item_type,
+                )
+            )
+        menu.exec(QCursor.pos())
+
+    def _clear_add_modes(self) -> None:
+        self._apply_structure_add_armed(False)
+        self._apply_trigger_add_armed(False)
+        self._apply_constraint_add_armed(False)
+
+    def _apply_structure_add_armed(
+        self,
+        armed: bool,
+        element_type: str | None = None,
+    ) -> None:
+        self._structure_add_armed = bool(armed)
+        if element_type in STRUCTURE_ADD_TYPES:
+            self._structure_add_type = str(element_type)
+        self._rail_canvas.set_structure_add_armed(self._structure_add_armed)
+        self._track_canvas.set_structure_add_armed(
+            self._structure_add_armed,
+            self._structure_add_type,
+        )
+        if self._structure_add_armed:
+            self._apply_trigger_add_armed(False)
+            self._apply_constraint_add_armed(False)
+
+    def _on_structure_item_create_requested(self, element_type: str, time_s: float) -> None:
+        self._apply_structure_add_armed(False)
+        self.structureItemCreateRequested.emit(str(element_type), float(time_s))
+
     def _toggle_trigger_add_armed(self) -> None:
         self._apply_trigger_add_armed(not self._trigger_add_armed)
 
@@ -2109,6 +2356,7 @@ class TimelineDock(QFrame):
         self._rail_canvas.set_trigger_add_armed(self._trigger_add_armed)
         self._track_canvas.set_trigger_add_armed(self._trigger_add_armed)
         if self._trigger_add_armed:
+            self._apply_structure_add_armed(False)
             self._apply_constraint_add_armed(False)
 
     def set_constraint_create_key(self, key: str) -> None:
@@ -2126,6 +2374,7 @@ class TimelineDock(QFrame):
         self._track_canvas.set_constraint_add_armed(self._constraint_add_armed)
         self._track_canvas.set_constraint_create_key(self._constraint_create_key)
         if self._constraint_add_armed:
+            self._apply_structure_add_armed(False)
             self._apply_trigger_add_armed(False)
 
     def _on_event_trigger_create_requested(self, time_s: float) -> None:
@@ -2175,9 +2424,10 @@ class TimelineDock(QFrame):
     def keyPressEvent(self, event) -> None:  # noqa: N802
         key = event.key()
         modifiers = event.modifiers()
-        if key == Qt.Key_Escape and (self._trigger_add_armed or self._constraint_add_armed):
-            self._apply_trigger_add_armed(False)
-            self._apply_constraint_add_armed(False)
+        if key == Qt.Key_Escape and (
+            self._structure_add_armed or self._trigger_add_armed or self._constraint_add_armed
+        ):
+            self._clear_add_modes()
             event.accept()
             return
         if modifiers & Qt.ControlModifier:
@@ -3205,20 +3455,16 @@ def _closest_time_for_point(
     return float(sim_index.sample_t[best_idx])
 
 
-def resolve_trigger_placement_for_time(
+def _resolve_path_axis_position_for_time(
     path: Path,
     config: dict[str, object] | None,
     time_s: float,
     *,
     use_sim_time: bool = True,
-) -> TriggerPlacement | None:
+) -> tuple[dict[str, object], float, float, float, float]:
     path = path or Path()
     path_elements = list(getattr(path, "path_elements", []) or [])
     anchor_data = _build_anchor_distances(path_elements)
-    anchor_indices = list(anchor_data.get("anchor_indices", []) or [])
-    if len(anchor_indices) < 2:
-        return None
-
     total_path_s = max(0.0, float(anchor_data.get("total_s_m", 0.0)))
     display_s = max(total_path_s, 1.0)
     projection = TimelineProjection(
@@ -3234,7 +3480,8 @@ def resolve_trigger_placement_for_time(
         use_sim_time=use_sim_time,
     )
 
-    target_time_s = max(0.0, min(float(time_s), float(max(total_t, 0.0))))
+    requested_time_s = float(time_s)
+    target_time_s = max(0.0, min(requested_time_s, float(max(total_t, 0.0))))
     if sim_index is not None and len(sim_index.sample_t) >= 2:
         sample_t = sim_index.sample_t
         sample_s = sim_index.sample_s
@@ -3264,6 +3511,144 @@ def resolve_trigger_placement_for_time(
         else:
             target_s = float(mapper(0.0))
 
+    return anchor_data, float(target_s), float(total_path_s), float(total_t), requested_time_s
+
+
+def _anchor_position(
+    path_elements: list[object],
+    index: int,
+) -> tuple[float, float] | None:
+    if index < 0 or index >= len(path_elements):
+        return None
+    element = path_elements[index]
+    if isinstance(element, TranslationTarget):
+        return float(element.x_meters), float(element.y_meters)
+    if isinstance(element, Waypoint):
+        return (
+            float(element.translation_target.x_meters),
+            float(element.translation_target.y_meters),
+        )
+    return None
+
+
+def resolve_structure_placement_for_time(
+    path: Path,
+    config: dict[str, object] | None,
+    time_s: float,
+    element_type: str,
+    *,
+    use_sim_time: bool = True,
+) -> StructurePlacement | None:
+    element_type = str(element_type)
+    if element_type not in STRUCTURE_ADD_TYPES:
+        return None
+
+    path = path or Path()
+    path_elements = list(getattr(path, "path_elements", []) or [])
+    anchor_data, target_s, total_path_s, total_t, requested_time_s = (
+        _resolve_path_axis_position_for_time(
+            path,
+            config,
+            time_s,
+            use_sim_time=use_sim_time,
+        )
+    )
+    anchor_indices = [int(index) for index in list(anchor_data.get("anchor_indices", []) or [])]
+    anchor_s_by_path_index = dict(anchor_data.get("anchor_s_by_path_index", {}) or {})
+
+    if element_type in {"translation", "waypoint"}:
+        if not anchor_indices:
+            return StructurePlacement(insert_index=0)
+        if len(anchor_indices) == 1:
+            anchor_pos = _anchor_position(path_elements, anchor_indices[0])
+            insert_index = 0 if requested_time_s <= 0.0 else anchor_indices[0] + 1
+            return StructurePlacement(
+                insert_index=int(insert_index),
+                x_m=None if anchor_pos is None else float(anchor_pos[0]),
+                y_m=None if anchor_pos is None else float(anchor_pos[1]),
+            )
+
+        first_anchor = anchor_indices[0]
+        last_anchor = anchor_indices[-1]
+        first_s = float(anchor_s_by_path_index.get(first_anchor, 0.0))
+        last_s = float(anchor_s_by_path_index.get(last_anchor, total_path_s))
+        if target_s <= first_s + 1e-9:
+            anchor_pos = _anchor_position(path_elements, first_anchor)
+            return StructurePlacement(
+                insert_index=int(first_anchor),
+                x_m=None if anchor_pos is None else float(anchor_pos[0]),
+                y_m=None if anchor_pos is None else float(anchor_pos[1]),
+            )
+        if target_s >= last_s - 1e-9:
+            anchor_pos = _anchor_position(path_elements, last_anchor)
+            return StructurePlacement(
+                insert_index=int(last_anchor) + 1,
+                x_m=None if anchor_pos is None else float(anchor_pos[0]),
+                y_m=None if anchor_pos is None else float(anchor_pos[1]),
+            )
+
+    if len(anchor_indices) < 2:
+        return None
+    if element_type == "rotation" and requested_time_s > max(0.0, total_t) + 1e-9:
+        return None
+
+    anchor_s_by_path_index = dict(anchor_data.get("anchor_s_by_path_index", {}) or {})
+    segment_start_index = anchor_indices[0]
+    segment_end_index = anchor_indices[1]
+    segment_start_s = float(anchor_s_by_path_index.get(segment_start_index, 0.0))
+    segment_end_s = float(anchor_s_by_path_index.get(segment_end_index, segment_start_s))
+
+    for anchor_idx in range(len(anchor_indices) - 1):
+        start_idx = int(anchor_indices[anchor_idx])
+        end_idx = int(anchor_indices[anchor_idx + 1])
+        start_s = float(anchor_s_by_path_index.get(start_idx, 0.0))
+        end_s = float(anchor_s_by_path_index.get(end_idx, start_s))
+        segment_start_index = start_idx
+        segment_end_index = end_idx
+        segment_start_s = start_s
+        segment_end_s = end_s
+        if target_s <= end_s + 1e-9 or anchor_idx == len(anchor_indices) - 2:
+            break
+
+    seg_len = max(0.0, segment_end_s - segment_start_s)
+    if seg_len <= 1e-9:
+        t_ratio = 0.0
+    else:
+        t_ratio = (float(target_s) - segment_start_s) / seg_len
+    t_ratio = max(0.0, min(1.0, float(t_ratio)))
+
+    if element_type == "rotation":
+        return StructurePlacement(insert_index=int(segment_end_index), t_ratio=t_ratio)
+
+    start_pos = _anchor_position(path_elements, int(segment_start_index))
+    end_pos = _anchor_position(path_elements, int(segment_end_index))
+    if start_pos is None or end_pos is None:
+        return StructurePlacement(insert_index=int(segment_end_index))
+    x_m = float(start_pos[0]) + (float(end_pos[0]) - float(start_pos[0])) * t_ratio
+    y_m = float(start_pos[1]) + (float(end_pos[1]) - float(start_pos[1])) * t_ratio
+    return StructurePlacement(insert_index=int(segment_end_index), x_m=x_m, y_m=y_m)
+
+
+def resolve_trigger_placement_for_time(
+    path: Path,
+    config: dict[str, object] | None,
+    time_s: float,
+    *,
+    use_sim_time: bool = True,
+) -> TriggerPlacement | None:
+    path = path or Path()
+    path_elements = list(getattr(path, "path_elements", []) or [])
+    anchor_data, target_s, _total_path_s, _total_t, _requested_time_s = (
+        _resolve_path_axis_position_for_time(
+            path,
+            config,
+            time_s,
+            use_sim_time=use_sim_time,
+        )
+    )
+    anchor_indices = list(anchor_data.get("anchor_indices", []) or [])
+    if len(anchor_indices) < 2:
+        return None
     anchor_s_by_path_index = dict(anchor_data.get("anchor_s_by_path_index", {}) or {})
     segment_start_index = anchor_indices[0]
     segment_end_index = anchor_indices[1]

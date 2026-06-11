@@ -9,6 +9,7 @@ from ui.timeline.placeholder import (
     _constraint_creation_range_for_s,
     _constraint_move_range_for_s,
     _constraint_start_ordinal_for_s,
+    resolve_structure_placement_for_time,
 )
 from ui.qt_compat import Qt
 
@@ -180,3 +181,98 @@ def test_invalid_constraint_drag_preview_is_kept_for_feedback(qt_app):
 
     assert canvas._pressed_constraint_preview == (3, 3)
     assert not canvas._pressed_constraint_preview_valid
+
+
+def test_structure_translation_placement_interpolates_between_anchors():
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(4.0, 2.0),
+        ],
+    )
+
+    placement = resolve_structure_placement_for_time(
+        path,
+        {},
+        (math.hypot(4.0, 2.0) / 2.0) / 4.5,
+        "translation",
+        use_sim_time=False,
+    )
+
+    assert placement is not None
+    assert placement.insert_index == 1
+    assert math.isclose(placement.x_m, 2.0)
+    assert math.isclose(placement.y_m, 1.0)
+
+
+def test_structure_waypoint_can_be_inserted_after_single_anchor():
+    path = Path(path_elements=[TranslationTarget(1.0, 2.0)])
+
+    placement = resolve_structure_placement_for_time(
+        path,
+        {},
+        0.5,
+        "waypoint",
+        use_sim_time=False,
+    )
+
+    assert placement is not None
+    assert placement.insert_index == 1
+    assert math.isclose(placement.x_m, 1.0)
+    assert math.isclose(placement.y_m, 2.0)
+
+
+def test_structure_rotation_requires_two_anchors():
+    path = Path(path_elements=[TranslationTarget(1.0, 2.0)])
+
+    assert (
+        resolve_structure_placement_for_time(
+            path,
+            {},
+            0.0,
+            "rotation",
+            use_sim_time=False,
+        )
+        is None
+    )
+
+
+def test_structure_rotation_placement_uses_segment_ratio():
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(4.0, 0.0),
+        ],
+    )
+
+    placement = resolve_structure_placement_for_time(
+        path,
+        {},
+        1.0 / 4.5,
+        "rotation",
+        use_sim_time=False,
+    )
+
+    assert placement is not None
+    assert placement.insert_index == 1
+    assert math.isclose(placement.t_ratio, 0.25)
+
+
+def test_structure_rotation_is_invalid_after_real_path_end():
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(1.0, 0.0),
+        ],
+    )
+
+    assert (
+        resolve_structure_placement_for_time(
+            path,
+            {},
+            0.5,
+            "rotation",
+            use_sim_time=False,
+        )
+        is None
+    )
