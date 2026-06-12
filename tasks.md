@@ -149,26 +149,7 @@ Exit criteria:
 
 - users can build a path from the redesigned UI without relying on the removed Path Elements sidebar list
 
-## Phase 7: Restore Structure Reordering
-
-Objective:
-
-- restore the ability to reorder path elements while keeping timeline/canvas/sidebar selection stable
-
-Tasks:
-
-- [ ] Provide an intentional structure reorder interaction for timeline path items or another clearly visible structure control
-- [ ] Keep Translation and Waypoint order changes visually obvious in the structure track
-- [ ] Keep Rotation and Event Trigger items attached to valid neighboring anchors after reorder
-- [ ] Update ranged-constraint ordinals when structure order changes
-- [ ] Preserve selected item identity after reorder whenever that item still exists
-- [ ] Preserve undo/redo and autosave for reorder operations
-
-Exit criteria:
-
-- users can change path sequence order from the redesigned UI with the same model-level capability the old sidebar list provided
-
-## Phase 8: Restore Flat Path Constraint Editing
+## Phase 7: Restore Flat Path Constraint Editing
 
 Objective:
 
@@ -187,7 +168,7 @@ Exit criteria:
 
 - users can inspect and edit every persisted path constraint supported by the original codebase
 
-## Phase 9: Timeline Delete Parity
+## Phase 8: Timeline Delete Parity
 
 Objective:
 
@@ -206,7 +187,7 @@ Exit criteria:
 
 - pressing Delete/Backspace on a selected timeline item performs the same safe deletion users expect from the rest of the editor
 
-## Phase 10: Final Cleanup and Hardening
+## Phase 9: Final Cleanup and Hardening
 
 Objective:
 
@@ -216,9 +197,9 @@ Tasks:
 
 - [ ] Remove or hide old compact ranged-constraint browsing once the timeline replacement is stable
 - [ ] Keep the sidebar focused on the selected item’s exact properties
-- [ ] Add tests for timeline projection, selection sync, trigger edits, constraint edits, path structure authoring, structure reordering, flat constraints, delete parity, and undo/redo
+- [ ] Add tests for timeline projection, selection sync, trigger edits, constraint edits, path structure authoring, flat constraints, delete parity, and undo/redo
 - [ ] Manually verify dense paths, resize behavior, save/load compatibility, autosave, and undo/redo
-- [ ] Remove dead code only after Phases 6 through 9 are complete and manually verified
+- [ ] Remove dead code only after Phases 6 through 8 are complete and manually verified
 
 Exit criteria:
 
@@ -231,8 +212,9 @@ Exit criteria:
 - merge adjacent compatible ranged-constraint spans
 - duplicate ranged-constraint spans
 - duplicate event triggers
+- manual path structure reordering
 
-These remain possible later enhancements, but they should not block parity work in Phases 6 through 9.
+These remain possible later enhancements, but they should not block parity work in Phases 6 through 8.
 
 ## Cross-Cutting Requirements
 
@@ -246,7 +228,7 @@ These remain possible later enhancements, but they should not block parity work 
 ## Definition of Done
 
 - users can understand path structure from the bottom timeline
-- users can create and reorder path structure from the redesigned UI
+- users can create path structure from the redesigned UI
 - users can create and edit event triggers from the timeline
 - users can create and edit ranged constraints from the timeline
 - users can edit flat path constraints that are not timeline spans
