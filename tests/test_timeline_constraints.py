@@ -16,6 +16,7 @@ from ui.timeline.placeholder import (
     TimelineDock,
     _build_projection,
     _constraint_creation_range_for_s,
+    _constraint_move_range_for_display_start,
     _constraint_move_range_for_s,
     _constraint_start_ordinal_for_s,
     resolve_structure_placement_for_time,
@@ -91,6 +92,52 @@ def test_constraint_move_drop_zones_follow_applied_ranges():
 
     assert _constraint_move_range_for_s(positions, 2, 3, 0.5) == (1, 2)
     assert _constraint_move_range_for_s(positions, 2, 3, 2.5) == (3, 4)
+
+
+def test_constraint_body_move_preserves_visual_width_at_left_edge():
+    positions = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
+
+    assert _constraint_move_range_for_display_start(positions, 3, 5, -10.0) == (2, 4)
+
+
+def test_constraint_body_move_from_left_edge_preserves_visual_width_when_dragged_right():
+    positions = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
+
+    assert _constraint_move_range_for_display_start(positions, 2, 4, 1.1) == (3, 5)
+
+
+def test_constraint_body_drag_uses_press_offset_to_avoid_large_jump(qt_app):
+    key = "max_velocity_meters_per_sec"
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(1.0, 0.0),
+            TranslationTarget(2.0, 0.0),
+            TranslationTarget(3.0, 0.0),
+            TranslationTarget(4.0, 0.0),
+            TranslationTarget(5.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(key=key, value=2.0, start_ordinal=3, end_ordinal=5),
+        ],
+    )
+    dock = TimelineDock(path)
+    canvas = dock._track_canvas
+    row = next(row for row in dock._projection.rows if row.title == "Constraints")
+    span = row.spans[0]
+    display_start, display_end = span.start_s_m, span.end_s_m
+    press_s = display_end - 0.1
+    canvas._pressed_constraint_span = span
+    canvas._pressed_constraint_action = "move"
+    canvas._pressed_constraint_origin = (3, 5)
+    canvas._pressed_constraint_preview = (3, 5)
+    canvas._pressed_constraint_preview_valid = True
+    canvas._pressed_constraint_move_press_s_m = press_s
+    canvas._pressed_constraint_move_origin_bounds = (display_start, display_end)
+
+    canvas._update_constraint_drag_preview(canvas._x_for_s(press_s + 0.02))
+
+    assert canvas._pressed_constraint_preview == (3, 5)
 
 
 def test_constraint_left_resize_snaps_to_displayed_start_edges():

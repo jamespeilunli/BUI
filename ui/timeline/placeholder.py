@@ -455,6 +455,8 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._pressed_constraint_press_pos: tuple[float, float] | None = None
         self._pressed_constraint_drag_active = False
         self._pressed_constraint_drag_offset = 0
+        self._pressed_constraint_move_press_s_m: float | None = None
+        self._pressed_constraint_move_origin_bounds: tuple[float, float] | None = None
         self._creating_constraint_key: str | None = None
         self._creating_constraint_start: int | None = None
         self._creating_constraint_anchor_s_m: float | None = None
@@ -1045,12 +1047,28 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             new_end = max(start_ord, int(target_ordinal))
         else:
             positions = row.constraint_positions_by_key.get(str(span.constraint_key), [])
-            move_range = _constraint_move_range_for_s(
-                list(positions),
-                int(start_ord),
-                int(end_ord),
-                self._s_for_x(float(x)),
-            )
+            current_s_m = self._s_for_x(float(x))
+            if (
+                self._pressed_constraint_move_press_s_m is not None
+                and self._pressed_constraint_move_origin_bounds is not None
+            ):
+                origin_start_s_m, _origin_end_s_m = self._pressed_constraint_move_origin_bounds
+                target_start_s_m = origin_start_s_m + (
+                    current_s_m - float(self._pressed_constraint_move_press_s_m)
+                )
+                move_range = _constraint_move_range_for_display_start(
+                    list(positions),
+                    int(start_ord),
+                    int(end_ord),
+                    target_start_s_m,
+                )
+            else:
+                move_range = _constraint_move_range_for_s(
+                    list(positions),
+                    int(start_ord),
+                    int(end_ord),
+                    current_s_m,
+                )
             if move_range is None:
                 return
             new_start, new_end = move_range
@@ -1107,6 +1125,8 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         self._pressed_constraint_preview_valid = True
         self._pressed_constraint_press_pos = None
         self._pressed_constraint_drag_active = False
+        self._pressed_constraint_move_press_s_m = None
+        self._pressed_constraint_move_origin_bounds = None
         self._creating_constraint_key = None
         self._creating_constraint_start = None
         self._creating_constraint_anchor_s_m = None
@@ -1182,7 +1202,26 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                     )
                     row = self._constraint_row()
                     if row is not None and span.constraint_key:
-                        click_ord = self._ordinal_for_x(row, str(span.constraint_key), float(event.position().x()))
+                        positions = row.constraint_positions_by_key.get(
+                            str(span.constraint_key),
+                            [],
+                        )
+                        if positions:
+                            self._pressed_constraint_move_press_s_m = self._s_for_x(
+                                float(event.position().x())
+                            )
+                            self._pressed_constraint_move_origin_bounds = (
+                                _constraint_display_range_from_positions(
+                                    list(positions),
+                                    start_ord,
+                                    end_ord,
+                                )
+                            )
+                        click_ord = self._ordinal_for_x(
+                            row,
+                            str(span.constraint_key),
+                            float(event.position().x()),
+                        )
                         if click_ord is not None:
                             self._pressed_constraint_drag_offset = int(click_ord) - start_ord
                     self._apply_constraint_drag_cursor()
@@ -1374,6 +1413,8 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                 self._pressed_constraint_press_pos = None
                 self._pressed_constraint_drag_active = False
                 self._pressed_constraint_drag_offset = 0
+                self._pressed_constraint_move_press_s_m = None
+                self._pressed_constraint_move_origin_bounds = None
                 self._update_hover_feedback(float(event.position().x()), float(event.position().y()))
                 self.update()
             event.accept()
@@ -1501,9 +1542,10 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                 if row.spans:
                     for span, rect in self._iter_span_rects(row, track_rect):
                         if rect.adjusted(-4.0, -2.0, 4.0, 2.0).contains(x, y):
-                            if abs(float(x) - rect.left()) <= 6.0:
+                            edge_hit_width = min(6.0, max(2.0, rect.width() / 3.0))
+                            if abs(float(x) - rect.left()) <= edge_hit_width:
                                 return ("span_edge", (span, "start"))
-                            if abs(float(x) - rect.right()) <= 6.0:
+                            if abs(float(x) - rect.right()) <= edge_hit_width:
                                 return ("span_edge", (span, "end"))
                         if rect.adjusted(-3.0, -2.0, 3.0, 2.0).contains(x, y):
                             return ("span", span)
@@ -2790,6 +2832,100 @@ def _constraint_display_range_from_positions(
     return float(positions[start_index]), float(positions[end_index])
 
 
+def _constraint_display_indices_for_ordinals(
+    positions: list[float],
+    start_ordinal: int,
+    end_ordinal: int,
+) -> tuple[int, int] | None:
+    if not positions:
+        return None
+    total = len(positions)
+    start = max(1, min(int(start_ordinal), total))
+    end = max(start, min(int(end_ordinal), total))
+    start_index = max(0, start - 2 if start > 1 else start - 1)
+    end_index = max(0, min(end - 1, total - 1))
+    return int(start_index), int(end_index)
+
+
+def _constraint_ordinals_for_display_indices(
+    positions: list[float],
+    start_index: int,
+    end_index: int,
+    *,
+    preferred_start_ordinal: int,
+) -> tuple[int, int] | None:
+    if not positions:
+        return None
+    total = len(positions)
+    display_start = max(0, min(int(start_index), total - 1))
+    display_end = max(display_start, min(int(end_index), total - 1))
+
+    end_ordinal = max(1, min(total, display_end + 1))
+    if display_start == 0:
+        if display_end == 0:
+            start_ordinal = 1
+        elif int(preferred_start_ordinal) == 1:
+            start_ordinal = 1
+        else:
+            start_ordinal = 2
+    else:
+        start_ordinal = display_start + 2
+
+    start_ordinal = max(1, min(int(start_ordinal), end_ordinal))
+    return int(start_ordinal), int(end_ordinal)
+
+
+def _constraint_move_range_for_display_start(
+    positions: list[float],
+    start_ordinal: int,
+    end_ordinal: int,
+    display_start_s_m: float,
+) -> tuple[int, int] | None:
+    """Move a ranged constraint by its visual left edge, preserving applied width.
+
+    Ranged constraints use inclusive ordinals, but their visible span is the
+    applied segment range. The first visible segment is ambiguous because both
+    ordinal starts 1 and 2 can draw from the far-left edge; body moves should
+    preserve the displayed clip width instead of falling into the shorter
+    ordinal candidate at that boundary.
+    """
+    display_indices = _constraint_display_indices_for_ordinals(
+        positions,
+        start_ordinal,
+        end_ordinal,
+    )
+    if display_indices is None:
+        return None
+    total = len(positions)
+    origin_start_index, origin_end_index = display_indices
+    display_width = max(0, int(origin_end_index) - int(origin_start_index))
+    if display_width <= 0:
+        return _constraint_move_range_for_s(
+            positions,
+            start_ordinal,
+            end_ordinal,
+            display_start_s_m,
+        )
+
+    max_start_index = max(0, total - 1 - display_width)
+    target = float(display_start_s_m)
+    candidate_start_index = min(
+        range(max_start_index + 1),
+        key=lambda index: (
+            abs(target - float(positions[index])),
+            abs(index - origin_start_index),
+            index,
+        ),
+    )
+    candidate_end_index = candidate_start_index + display_width
+    return _constraint_ordinals_for_display_indices(
+        positions,
+        candidate_start_index,
+        candidate_end_index,
+        preferred_start_ordinal=int(start_ordinal),
+    )
+
+
 def _constraint_move_range_for_s(
     positions: list[float],
     start_ordinal: int,
@@ -2910,6 +3046,12 @@ def _constraint_creation_range_for_s(
 
     anchor = float(anchor_s_m)
     current = float(current_s_m)
+    if math.isclose(anchor, current, abs_tol=1e-9):
+        ordinal = _constraint_area_ordinal_for_s(positions, anchor, bias="right")
+        if ordinal is None:
+            return None
+        return int(ordinal), int(ordinal)
+
     if current >= anchor:
         start_ordinal = _constraint_area_ordinal_for_s(positions, anchor, bias="right")
         end_ordinal = _constraint_area_ordinal_for_s(positions, current, bias="left")
