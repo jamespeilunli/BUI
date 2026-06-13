@@ -1,0 +1,324 @@
+from __future__ import annotations
+
+import math
+
+from models.path_model import (
+    EventTrigger,
+    Path,
+    RangedConstraint,
+    RotationTarget,
+    TranslationTarget,
+    Waypoint,
+)
+from ui.main_window.window import MainWindow
+from ui.timeline.placeholder import StructurePlacement, TriggerPlacement
+
+
+def _new_window() -> MainWindow:
+    window = MainWindow()
+    window.project_manager.load_last_project = lambda: False
+    window._action_open_project = lambda force_dialog=False: None
+    return window
+
+
+def _simple_path() -> Path:
+    return Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(4.0, 0.0),
+        ]
+    )
+
+
+def test_timeline_path_selection_signal_updates_sidebar_and_canvas(
+    qt_app,
+    install_main_window_path,
+    process_events,
+):
+    window = _new_window()
+    try:
+        install_main_window_path(window, _simple_path())
+
+        window.timeline.pathItemSelected.emit(1)
+        process_events()
+
+        assert window.sidebar.get_selected_index() == 1
+        assert window.timeline._selection is not None
+        assert window.timeline._selection.path_index == 1
+        assert len(window.canvas.graphics_scene.selectedItems()) == 1
+    finally:
+        window.close()
+
+
+def test_timeline_empty_selection_signal_clears_all_regions(
+    qt_app,
+    install_main_window_path,
+    process_events,
+):
+    window = _new_window()
+    try:
+        install_main_window_path(window, _simple_path())
+        window._select_path_index_across_views(1, center_canvas=False)
+        assert window.sidebar.get_selected_index() == 1
+
+        window.timeline._on_empty_area_clicked()
+        process_events()
+
+        assert window.sidebar.get_selected_index() is None
+        assert window.timeline._selection is None
+        assert window.canvas.graphics_scene.selectedItems() == []
+    finally:
+        window.close()
+
+
+def test_timeline_constraint_selection_signal_updates_sidebar_and_canvas_overlay(
+    qt_app,
+    install_main_window_path,
+    process_events,
+):
+    window = _new_window()
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(2.0, 0.0),
+            TranslationTarget(4.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(
+                key="max_velocity_meters_per_sec",
+                value=2.0,
+                start_ordinal=1,
+                end_ordinal=2,
+            )
+        ],
+    )
+    try:
+        install_main_window_path(window, path)
+
+        window.timeline.select_constraint_range("max_velocity_meters_per_sec", 1, 2)
+        window.timeline.constraintRangeSelected.emit("max_velocity_meters_per_sec", 1, 2)
+        process_events()
+
+        assert window.sidebar.get_selected_index() is None
+        assert window.sidebar._selected_constraint_ref == ("max_velocity_meters_per_sec", 1, 2)
+        assert window.timeline._selection is not None
+        assert window.timeline._selection.kind == "constraint"
+        assert window.canvas._constraint_highlight_indices == [0, 1]
+        assert window.canvas._range_overlay_lines
+    finally:
+        window.close()
+
+
+def test_timeline_structure_create_adds_waypoint_selects_it_and_records_undo(
+    qt_app,
+    monkeypatch,
+    install_main_window_path,
+    process_events,
+):
+    window = _new_window()
+    schedule_calls: list[None] = []
+    window.autosave.schedule = lambda: schedule_calls.append(None)
+    monkeypatch.setattr(
+        "ui.main_window.window.resolve_structure_placement_for_time",
+        lambda path, config, time_s, element_type: StructurePlacement(
+            insert_index=1,
+            x_m=2.0,
+            y_m=0.5,
+        ),
+    )
+    try:
+        install_main_window_path(window, _simple_path())
+
+        window._on_timeline_structure_item_create_requested("waypoint", 0.5)
+        process_events()
+
+        assert len(window.path.path_elements) == 3
+        assert isinstance(window.path.path_elements[1], Waypoint)
+        assert math.isclose(window.path.path_elements[1].translation_target.x_meters, 2.0)
+        assert window.sidebar.get_selected_index() == 1
+        assert window.timeline._selection.path_index == 1
+        assert window.undo_manager.can_undo()
+
+        window.undo_manager.undo()
+        assert [type(element) for element in window.path.path_elements] == [
+            TranslationTarget,
+            TranslationTarget,
+        ]
+        window.undo_manager.redo()
+        assert isinstance(window.path.path_elements[1], Waypoint)
+        assert schedule_calls
+    finally:
+        window.close()
+
+
+def test_timeline_event_trigger_create_and_move_preserve_selection_and_undo(
+    qt_app,
+    monkeypatch,
+    install_main_window_path,
+    process_events,
+):
+    window = _new_window()
+    placements = [
+        TriggerPlacement(insert_index=1, t_ratio=0.25),
+        TriggerPlacement(insert_index=2, t_ratio=0.75),
+    ]
+
+    def fake_resolve(path, config, time_s):
+        return placements.pop(0)
+
+    monkeypatch.setattr("ui.main_window.window.resolve_trigger_placement_for_time", fake_resolve)
+    try:
+        install_main_window_path(window, _simple_path())
+
+        window._on_timeline_event_trigger_create_requested(0.25)
+        process_events()
+        trigger = window.path.path_elements[1]
+        assert isinstance(trigger, EventTrigger)
+        assert math.isclose(trigger.t_ratio, 0.25)
+        assert window.undo_manager.get_undo_description() == "Add EventTrigger"
+
+        window._on_timeline_event_trigger_move_requested(1, 0.75)
+        process_events()
+
+        assert isinstance(window.path.path_elements[2], EventTrigger)
+        assert math.isclose(window.path.path_elements[2].t_ratio, 0.75)
+        assert window.sidebar.get_selected_index() == 2
+        assert window.undo_manager.get_undo_description() == "Move EventTrigger"
+
+        window.undo_manager.undo()
+        assert window.path.path_elements[1] is not trigger
+        assert isinstance(window.path.path_elements[1], EventTrigger)
+    finally:
+        window.close()
+
+
+def test_timeline_constraint_create_update_delete_records_undo_and_autosave(
+    qt_app,
+    install_main_window_path,
+    process_events,
+):
+    window = _new_window()
+    schedule_calls: list[None] = []
+    window.autosave.schedule = lambda: schedule_calls.append(None)
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(2.0, 0.0),
+            TranslationTarget(4.0, 0.0),
+        ],
+    )
+    try:
+        install_main_window_path(window, path)
+
+        window._on_timeline_constraint_range_create_requested(
+            "max_velocity_meters_per_sec",
+            1,
+            1,
+        )
+        process_events()
+
+        assert len(window.path.ranged_constraints) == 1
+        assert window.path.ranged_constraints[0].start_ordinal == 1
+        assert window.sidebar._selected_constraint_ref == ("max_velocity_meters_per_sec", 1, 1)
+        assert window.undo_manager.get_undo_description() == "Add constraint range"
+
+        window._on_timeline_constraint_range_update_requested(
+            0,
+            "max_velocity_meters_per_sec",
+            1,
+            1,
+            2,
+            2,
+            "move",
+        )
+        process_events()
+
+        assert (window.path.ranged_constraints[0].start_ordinal, window.path.ranged_constraints[0].end_ordinal) == (
+            2,
+            2,
+        )
+        assert window.undo_manager.get_undo_description() == "Move constraint range"
+
+        window._on_timeline_constraint_range_delete_requested(
+            0,
+            "max_velocity_meters_per_sec",
+            2,
+            2,
+        )
+        process_events()
+
+        assert window.path.ranged_constraints == []
+        assert window.sidebar._selected_constraint_ref is None
+        assert window.timeline._selection is None
+        assert window.undo_manager.get_undo_description() == "Delete constraint range"
+        assert schedule_calls
+
+        window.undo_manager.undo()
+        assert len(window.path.ranged_constraints) == 1
+        assert window.sidebar._selected_constraint_ref == ("max_velocity_meters_per_sec", 2, 2)
+    finally:
+        window.close()
+
+
+def test_timeline_constraint_create_rejects_same_key_overlap(
+    qt_app,
+    install_main_window_path,
+    process_events,
+):
+    window = _new_window()
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(2.0, 0.0),
+            TranslationTarget(4.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(
+                key="max_velocity_meters_per_sec",
+                value=2.0,
+                start_ordinal=1,
+                end_ordinal=2,
+            )
+        ],
+    )
+    try:
+        install_main_window_path(window, path)
+
+        window._on_timeline_constraint_range_create_requested(
+            "max_velocity_meters_per_sec",
+            2,
+            3,
+        )
+        process_events()
+
+        assert len(window.path.ranged_constraints) == 1
+        assert not window.undo_manager.can_undo()
+    finally:
+        window.close()
+
+
+def test_timeline_rotation_create_uses_segment_ratio(
+    qt_app,
+    monkeypatch,
+    install_main_window_path,
+    process_events,
+):
+    window = _new_window()
+    monkeypatch.setattr(
+        "ui.main_window.window.resolve_structure_placement_for_time",
+        lambda path, config, time_s, element_type: StructurePlacement(
+            insert_index=1,
+            t_ratio=0.4,
+        ),
+    )
+    try:
+        install_main_window_path(window, _simple_path())
+
+        window._on_timeline_structure_item_create_requested("rotation", 0.4)
+        process_events()
+
+        assert isinstance(window.path.path_elements[1], RotationTarget)
+        assert math.isclose(window.path.path_elements[1].t_ratio, 0.4)
+        assert window.sidebar.get_selected_index() == 1
+    finally:
+        window.close()

@@ -23,6 +23,7 @@ dev = [
     "black>=24.8.0",
     "mypy>=1.11.0",
     "pytest>=8.2.0",
+    "pytest-cov>=5.0.0",
     "ruff>=0.6.5",
 ]
 
@@ -67,3 +68,14 @@ files = ["models", "utils", "scripts", "tests"]
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["models", "utils", "ui"]
+omit = [
+    "assets_rc.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
