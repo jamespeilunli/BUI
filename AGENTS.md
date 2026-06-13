@@ -4,4 +4,5 @@ Notes
 
 - The user is very sensitive to visual correctness and alignment. They specifically care that timeline positions, bars, and playback feel exact and intuitive. Small offsets are likely to be noticed and called out. UI/UX should be the number one priority.
 - Carefully read and respect the following docs before beginning development: PYSIDE6_DEVELOPMENT.md, design.md, ui-spec.md, and tasks.md.
+- Validate every distinct function or feature with unit tests. Run tests using `uv run python3 -m pytest`
 - There is no `python`, there is `python3`
