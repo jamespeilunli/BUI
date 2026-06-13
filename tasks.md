@@ -176,12 +176,12 @@ Objective:
 
 Tasks:
 
-- [ ] Delete selected Event Trigger items from the timeline
-- [ ] Delete selected Rotation items from the timeline when valid
-- [ ] Delete selected Translation and Waypoint items from the timeline with the same safeguards used elsewhere in the app
-- [ ] Remap ranged constraints after deleting structure items
-- [ ] Clear or restore selection predictably after deletion
-- [ ] Preserve undo/redo and autosave for timeline deletion
+- [x] Delete selected Event Trigger items from the timeline
+- [x] Delete selected Rotation items from the timeline when valid
+- [x] Delete selected Translation and Waypoint items from the timeline with the same safeguards used elsewhere in the app
+- [x] Remap ranged constraints after deleting structure items
+- [x] Clear or restore selection predictably after deletion
+- [x] Preserve undo/redo and autosave for timeline deletion
 
 Exit criteria:
 
