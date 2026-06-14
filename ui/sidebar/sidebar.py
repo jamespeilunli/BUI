@@ -485,10 +485,6 @@ class Sidebar(QWidget):
         constraint.key = str(new_key)
         constraint.start_ordinal = int(new_start)
         constraint.end_ordinal = int(new_end)
-        try:
-            setattr(self.path.constraints, str(new_key), None)
-        except Exception:
-            pass
         self._selected_constraint_ref = (str(new_key), int(new_start), int(new_end))
         self._configure_constraint_spinbox(str(new_key))
         self.modelChanged.emit()

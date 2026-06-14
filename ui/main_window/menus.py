@@ -95,6 +95,11 @@ def build_menu_bar(window: "MainWindow") -> None:
     path_menu.addAction(window.action_current_path)
     path_menu.addSeparator()
 
+    window.action_path_settings = QAction("Settings…", window)
+    window.action_path_settings.triggered.connect(window._action_path_settings)
+    path_menu.addAction(window.action_path_settings)
+    path_menu.addSeparator()
+
     window.menu_load_path = path_menu.addMenu("Load Path")
     window.menu_load_path.aboutToShow.connect(window._populate_load_path_menu)
     path_menu.addSeparator()

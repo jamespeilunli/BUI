@@ -95,6 +95,7 @@ def test_serialize_mixed_path_preserves_flat_and_ranged_constraints():
     assert data["constraints"]["max_velocity_meters_per_sec"] == [
         {"value": 2.5, "start_ordinal": 0, "end_ordinal": 1}
     ]
+    assert data["constraints"]["default_max_velocity_meters_per_sec"] == 9.0
     assert data["constraints"]["end_translation_tolerance_meters"] == 0.05
     assert data["constraints"]["end_rotation_tolerance_deg"] == 2.0
 
@@ -114,6 +115,33 @@ def test_deserialize_flat_constraints_and_legacy_default_keys():
     assert restored.constraints.max_velocity_meters_per_sec == 3.5
     assert restored.constraints.end_translation_tolerance_meters == 0.04
     assert restored.constraints.end_rotation_tolerance_deg == 1.0
+
+
+def test_deserialize_same_key_flat_default_and_ranged_constraints():
+    restored = deserialize_path(
+        {
+            "constraints": {
+                "default_max_velocity_meters_per_sec": 2.0,
+                "max_velocity_meters_per_sec": [
+                    {"value": 1.5, "start_ordinal": 0, "end_ordinal": 0},
+                ],
+            },
+            "path_elements": [
+                {"type": "translation", "x_meters": 0.0, "y_meters": 0.0},
+                {"type": "translation", "x_meters": 1.0, "y_meters": 0.0},
+            ],
+        }
+    )
+
+    assert restored.constraints.max_velocity_meters_per_sec == 2.0
+    assert restored.ranged_constraints == [
+        RangedConstraint(
+            key="max_velocity_meters_per_sec",
+            value=1.5,
+            start_ordinal=1,
+            end_ordinal=1,
+        )
+    ]
 
 
 def test_deserialize_legacy_rotation_position_converts_to_segment_ratio():

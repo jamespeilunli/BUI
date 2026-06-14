@@ -49,6 +49,7 @@ from typing import Tuple, Optional
 from utils.project_manager import ProjectManager
 from utils.undo_system import UndoRedoManager, PathCommand, ConfigCommand
 from ..config_dialog import ConfigDialog
+from ..path_settings_dialog import PathSettingsDialog
 from .autosave import AutosaveController
 from .events import WindowEventMixin
 from .menus import build_menu_bar
@@ -740,10 +741,6 @@ class MainWindow(WindowEventMixin, QMainWindow):
         self.path.ranged_constraints.append(
             RangedConstraint(key=key, value=float(value), start_ordinal=start, end_ordinal=end)
         )
-        try:
-            setattr(self.path.constraints, key, None)
-        except Exception:
-            pass
 
         selection = (key, start, end)
         self._refresh_after_timeline_constraint_edit(selection)
@@ -1230,6 +1227,43 @@ class MainWindow(WindowEventMixin, QMainWindow):
             self.undo_manager.execute_command(command)
 
         QTimer.singleShot(0, create_command)
+
+    def _action_path_settings(self):
+        old_state = copy.deepcopy(self.path)
+        dlg = PathSettingsDialog(
+            self,
+            self.path,
+            self.project_manager.config_as_dict(),
+        )
+        result = dlg.exec()
+        if result != QDialog.Accepted:
+            return
+
+        values = dlg.get_values()
+        for key, value in values.items():
+            try:
+                setattr(self.path.constraints, key, float(value) if value is not None else None)
+            except Exception:
+                setattr(self.path.constraints, key, value)
+
+        if not self._has_path_changed_since(old_state):
+            return
+
+        self._refresh_after_path_settings_change()
+        self._record_path_change(
+            "Change Path Settings",
+            old_state,
+            suppress_first_refresh=True,
+        )
+
+    def _refresh_after_path_settings_change(self) -> None:
+        self.canvas.refresh_from_model()
+        self.canvas.update_handoff_radius_visualizers()
+        self.canvas.request_simulation_rebuild()
+        self.timeline.set_path(self.path, self._timeline_config())
+        self.sidebar.set_path(self.path)
+        self.sidebar.refresh_current_selection()
+        self.autosave.schedule()
 
     def _action_edit_config(self):
         old_config = copy.deepcopy(self.project_manager.config)

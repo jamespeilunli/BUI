@@ -143,11 +143,6 @@ class ConstraintManager(QObject):
                     return False
             except Exception:
                 pass
-            # Clear flat value storage for ranged keys
-            try:
-                setattr(self.path.constraints, key, None)
-            except Exception:
-                pass
 
         self.constraintAdded.emit(key, value)
         return True
@@ -175,12 +170,7 @@ class ConstraintManager(QObject):
         except Exception:
             ranged_list = []
         if not ranged_list:
-            # Nothing to remove; ensure flat cleared
-            try:
-                setattr(self.path.constraints, key, None)
-            except Exception:
-                pass
-            # Also remove any lingering UI container for this key
+            # Nothing to remove; clear only the ranged UI container.
             try:
                 self._remove_container_for_key(key)
             except Exception:
@@ -207,10 +197,6 @@ class ConstraintManager(QObject):
                 for rc in (getattr(self.path, "ranged_constraints", []) or [])
                 if getattr(rc, "key", None) != key
             ]
-        except Exception:
-            pass
-        try:
-            setattr(self.path.constraints, key, None)
         except Exception:
             pass
         # Remove visual container if present
@@ -270,11 +256,6 @@ class ConstraintManager(QObject):
                         rc0.value = float(value)
                     except Exception:
                         rc0.value = value
-                # Always clear flat storage
-                try:
-                    setattr(self.path.constraints, key, None)
-                except Exception:
-                    pass
             except Exception:
                 pass
 

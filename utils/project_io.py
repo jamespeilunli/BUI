@@ -96,11 +96,12 @@ def serialize_path(path: Path) -> Dict[str, Any]:
             "max_acceleration_deg_per_sec2",
             "end_rotation_tolerance_deg",
         ]:
-            if name in ranged_keys:
-                continue
             value = getattr(constraints, name, None)
             if value is not None:
-                constraints_obj[name] = float(value)
+                if name in ranged_keys:
+                    constraints_obj[f"default_{name}"] = float(value)
+                else:
+                    constraints_obj[name] = float(value)
 
     ranged_grouped: Dict[str, List[Dict[str, Any]]] = {}
     try:
@@ -160,12 +161,11 @@ def deserialize_path(data: Any, default_lookup: DefaultLookup | None = None) -> 
                 "max_acceleration_deg_per_sec2",
                 "end_rotation_tolerance_deg",
             ]:
-                if key in constraints_block:
+                legacy = f"default_{key}"
+                if key in constraints_block and not isinstance(constraints_block.get(key), list):
                     setattr(path.constraints, key, _opt_float(constraints_block.get(key)))
-                else:
-                    legacy = f"default_{key}"
-                    if legacy in constraints_block:
-                        setattr(path.constraints, key, _opt_float(constraints_block.get(legacy)))
+                elif legacy in constraints_block:
+                    setattr(path.constraints, key, _opt_float(constraints_block.get(legacy)))
 
         ranged_block_list: List[Dict[str, Any]] = []
         try:

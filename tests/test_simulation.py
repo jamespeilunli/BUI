@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 from models.path_model import EventTrigger, Path, RangedConstraint, RotationTarget, TranslationTarget
 from models.simulation import (
     ChassisSpeeds,
@@ -95,3 +97,35 @@ def test_simulation_applies_translation_and_rotation_ranged_constraints():
 
     assert constrained_result.total_time_s > unconstrained_result.total_time_s
     assert constrained_result.progress_by_time
+
+
+def test_simulation_does_not_allow_ranged_constraint_to_exceed_whole_path_limit():
+    config = {
+        "default_max_velocity_meters_per_sec": 5.0,
+        "default_max_acceleration_meters_per_sec2": 20.0,
+        "default_max_velocity_deg_per_sec": 360.0,
+        "default_max_acceleration_deg_per_sec2": 720.0,
+    }
+    elements = [
+        TranslationTarget(0.0, 0.0),
+        TranslationTarget(6.0, 0.0),
+    ]
+    flat_only = Path(path_elements=elements.copy())
+    flat_only.constraints.max_velocity_meters_per_sec = 1.0
+    ranged_above_flat = Path(
+        path_elements=elements.copy(),
+        ranged_constraints=[
+            RangedConstraint(
+                key="max_velocity_meters_per_sec",
+                value=4.0,
+                start_ordinal=1,
+                end_ordinal=2,
+            )
+        ],
+    )
+    ranged_above_flat.constraints.max_velocity_meters_per_sec = 1.0
+
+    flat_result = simulate_path(flat_only, config, dt_s=0.02)
+    ranged_result = simulate_path(ranged_above_flat, config, dt_s=0.02)
+
+    assert ranged_result.total_time_s == pytest.approx(flat_result.total_time_s)

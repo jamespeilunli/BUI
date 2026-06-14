@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 
+from PySide6.QtWidgets import QDialog
+
 from models.path_model import (
     EventTrigger,
     Path,
@@ -207,6 +209,7 @@ def test_timeline_constraint_create_update_delete_records_undo_and_autosave(
             TranslationTarget(4.0, 0.0),
         ],
     )
+    path.constraints.max_velocity_meters_per_sec = 1.5
     try:
         install_main_window_path(window, path)
 
@@ -218,6 +221,7 @@ def test_timeline_constraint_create_update_delete_records_undo_and_autosave(
         process_events()
 
         assert len(window.path.ranged_constraints) == 1
+        assert window.path.constraints.max_velocity_meters_per_sec == 1.5
         assert window.path.ranged_constraints[0].start_ordinal == 1
         assert window.sidebar._selected_constraint_ref == ("max_velocity_meters_per_sec", 1, 1)
         assert window.undo_manager.get_undo_description() == "Add constraint range"
@@ -320,5 +324,77 @@ def test_timeline_rotation_create_uses_segment_ratio(
         assert isinstance(window.path.path_elements[1], RotationTarget)
         assert math.isclose(window.path.path_elements[1].t_ratio, 0.4)
         assert window.sidebar.get_selected_index() == 1
+    finally:
+        window.close()
+
+
+def test_path_settings_action_updates_flat_constraints_and_preserves_ranges(
+    qt_app,
+    monkeypatch,
+    install_main_window_path,
+    process_events,
+):
+    window = _new_window()
+    schedule_calls: list[None] = []
+    window.autosave.schedule = lambda: schedule_calls.append(None)
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(2.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(
+                key="max_velocity_meters_per_sec",
+                value=3.0,
+                start_ordinal=1,
+                end_ordinal=2,
+            )
+        ],
+    )
+
+    values = {
+        "max_velocity_meters_per_sec": 2.0,
+        "max_acceleration_meters_per_sec2": 4.0,
+        "max_velocity_deg_per_sec": 90.0,
+        "max_acceleration_deg_per_sec2": 180.0,
+        "end_translation_tolerance_meters": 0.05,
+        "end_rotation_tolerance_deg": None,
+    }
+
+    class FakePathSettingsDialog:
+        def __init__(self, parent, dialog_path, config):
+            self.path = dialog_path
+
+        def exec(self):
+            return QDialog.Accepted
+
+        def get_values(self):
+            return dict(values)
+
+    monkeypatch.setattr("ui.main_window.window.PathSettingsDialog", FakePathSettingsDialog)
+    try:
+        install_main_window_path(window, path)
+        assert window.action_path_settings.text() == "Settings…"
+
+        window._action_path_settings()
+        process_events()
+
+        assert window.path.constraints.max_velocity_meters_per_sec == 2.0
+        assert window.path.constraints.max_acceleration_meters_per_sec2 == 4.0
+        assert window.path.constraints.max_velocity_deg_per_sec == 90.0
+        assert window.path.constraints.max_acceleration_deg_per_sec2 == 180.0
+        assert window.path.constraints.end_translation_tolerance_meters == 0.05
+        assert window.path.constraints.end_rotation_tolerance_deg is None
+        assert len(window.path.ranged_constraints) == 1
+        assert window.path.ranged_constraints[0].value == 3.0
+        assert window.undo_manager.get_undo_description() == "Change Path Settings"
+
+        window.undo_manager.undo()
+        assert window.path.constraints.max_velocity_meters_per_sec is None
+        assert len(window.path.ranged_constraints) == 1
+
+        window.undo_manager.redo()
+        assert window.path.constraints.max_velocity_meters_per_sec == 2.0
+        assert schedule_calls
     finally:
         window.close()

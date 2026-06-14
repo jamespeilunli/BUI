@@ -149,24 +149,29 @@ Exit criteria:
 
 - users can build a path from the redesigned UI without relying on the removed Path Elements sidebar list
 
-## Phase 7: Restore Flat Path Constraint Editing
+## Phase 7: Restore Per-Path Constraint Settings
 
 Objective:
 
-- restore editing for path-level constraints that are not represented as ranged timeline spans
+- restore editing for path-level constraints through a dedicated per-path settings surface
+- keep non-timeline constraints out of the timeline so ranged spans remain visually distinct
 
 Tasks:
 
-- [ ] Provide a sidebar detail state or compact path-level settings surface for flat constraints
-- [ ] Support add, edit, and remove for end translation tolerance
-- [ ] Support add, edit, and remove for end rotation tolerance
-- [ ] Support edit/remove for any existing flat velocity or acceleration constraints loaded from older projects
+- [ ] Add a `Settings` item under the `Path` dropdown
+- [ ] Open a per-path settings dialog or compact settings surface from `Path > Settings`
+- [ ] Support add, edit, and remove for per-path max velocity (`max_velocity_meters_per_sec`)
+- [ ] Support add, edit, and remove for per-path max acceleration (`max_acceleration_meters_per_sec2`)
+- [ ] Support add, edit, and remove for per-path max rotation velocity (`max_velocity_deg_per_sec`)
+- [ ] Support add, edit, and remove for per-path max rotation acceleration (`max_acceleration_deg_per_sec2`)
+- [ ] Support add, edit, and remove for end translation tolerance (`end_translation_tolerance_meters`)
+- [ ] Support add, edit, and remove for end rotation tolerance (`end_rotation_tolerance_deg`)
 - [ ] Make it visually clear that flat constraints affect the whole path or terminal condition, not a timeline span
 - [ ] Preserve undo/redo, autosave, and save/load compatibility
 
 Exit criteria:
 
-- users can inspect and edit every persisted path constraint supported by the original codebase
+- users can inspect and edit every persisted per-path constraint supported by the original codebase from `Path > Settings`
 
 ## Phase 8: Timeline Delete Parity
 
