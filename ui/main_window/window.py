@@ -195,12 +195,30 @@ class MainWindow(WindowEventMixin, QMainWindow):
             lambda key, s, e: self.sidebar.select_constraint_range(key, s, e, emit_preview=False),
             Qt.QueuedConnection,
         )
+        self.timeline.constraintRangeSelectedByIndex.connect(
+            lambda idx, key, s, e: self.sidebar.select_constraint_range_by_index(
+                idx,
+                key,
+                s,
+                e,
+                emit_preview=False,
+            ),
+            Qt.QueuedConnection,
+        )
         self.timeline.constraintRangeSelected.connect(
             lambda key, s, e: self.canvas.show_constraint_range_overlay(key, s, e),
             Qt.QueuedConnection,
         )
+        self.timeline.constraintRangeSelectedByIndex.connect(
+            lambda idx, key, s, e: self.canvas.show_constraint_range_overlay(key, s, e),
+            Qt.QueuedConnection,
+        )
         self.timeline.constraintRangeSelected.connect(
             lambda key, s, e: self.canvas.set_constraint_segment_highlight(key, s, e),
+            Qt.QueuedConnection,
+        )
+        self.timeline.constraintRangeSelectedByIndex.connect(
+            lambda idx, key, s, e: self.canvas.set_constraint_segment_highlight(key, s, e),
             Qt.QueuedConnection,
         )
         self.timeline.structureItemCreateRequested.connect(
@@ -632,15 +650,6 @@ class MainWindow(WindowEventMixin, QMainWindow):
         *,
         ignore_index: int | None = None,
     ) -> bool:
-        for idx, rc in enumerate(getattr(self.path, "ranged_constraints", []) or []):
-            if ignore_index is not None and int(idx) == int(ignore_index):
-                continue
-            if getattr(rc, "key", None) != key:
-                continue
-            other_start = int(getattr(rc, "start_ordinal", 1))
-            other_end = int(getattr(rc, "end_ordinal", other_start))
-            if int(start) <= other_end and int(end) >= other_start:
-                return False
         return True
 
     def _find_constraint_index(
@@ -670,7 +679,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
 
     def _refresh_after_timeline_constraint_edit(
         self,
-        selection: tuple[str, int, int] | None,
+        selection: tuple[str, int, int] | tuple[int, str, int, int] | None,
     ) -> None:
         self.canvas.refresh_from_model()
         self.canvas.update_handoff_radius_visualizers()
@@ -683,9 +692,25 @@ class MainWindow(WindowEventMixin, QMainWindow):
             self.canvas.clear_constraint_range_overlay()
             self.canvas.clear_constraint_segment_highlight()
         else:
-            key, start, end = selection
-            self.sidebar.select_constraint_range(key, start, end, emit_preview=False)
-            self.timeline.select_constraint_range(key, start, end)
+            if len(selection) == 4:
+                constraint_index, key, start, end = selection
+                self.sidebar.select_constraint_range_by_index(
+                    constraint_index,
+                    key,
+                    start,
+                    end,
+                    emit_preview=False,
+                )
+                self.timeline.select_constraint_range_by_index(
+                    constraint_index,
+                    key,
+                    start,
+                    end,
+                )
+            else:
+                key, start, end = selection
+                self.sidebar.select_constraint_range(key, start, end, emit_preview=False)
+                self.timeline.select_constraint_range(key, start, end)
             self.canvas.show_constraint_range_overlay(key, start, end)
             self.canvas.set_constraint_segment_highlight(key, start, end)
         self.autosave.schedule()
@@ -695,8 +720,8 @@ class MainWindow(WindowEventMixin, QMainWindow):
         description: str,
         old_state: Path,
         *,
-        redo_selection: tuple[str, int, int] | None,
-        undo_selection: tuple[str, int, int] | None,
+        redo_selection: tuple[str, int, int] | tuple[int, str, int, int] | None,
+        undo_selection: tuple[str, int, int] | tuple[int, str, int, int] | None,
     ) -> None:
         def create_command():
             command = PathCommand(
@@ -741,8 +766,9 @@ class MainWindow(WindowEventMixin, QMainWindow):
         self.path.ranged_constraints.append(
             RangedConstraint(key=key, value=float(value), start_ordinal=start, end_ordinal=end)
         )
+        constraint_index = len(self.path.ranged_constraints) - 1
 
-        selection = (key, start, end)
+        selection = (constraint_index, key, start, end)
         self._refresh_after_timeline_constraint_edit(selection)
         if self._has_path_changed_since(old_state):
             self._record_timeline_constraint_change(
@@ -782,10 +808,15 @@ class MainWindow(WindowEventMixin, QMainWindow):
 
         rc = self.path.ranged_constraints[constraint_index]
         old_state = copy.deepcopy(self.path)
-        undo_selection = (key, int(getattr(rc, "start_ordinal", old_start)), int(getattr(rc, "end_ordinal", old_end)))
+        undo_selection = (
+            constraint_index,
+            key,
+            int(getattr(rc, "start_ordinal", old_start)),
+            int(getattr(rc, "end_ordinal", old_end)),
+        )
         rc.start_ordinal = int(target_start)
         rc.end_ordinal = int(target_end)
-        redo_selection = (key, int(target_start), int(target_end))
+        redo_selection = (constraint_index, key, int(target_start), int(target_end))
 
         self._refresh_after_timeline_constraint_edit(redo_selection)
         if self._has_path_changed_since(old_state):
@@ -812,7 +843,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
             return
 
         old_state = copy.deepcopy(self.path)
-        undo_selection = (key, int(start_ordinal), int(end_ordinal))
+        undo_selection = (constraint_index, key, int(start_ordinal), int(end_ordinal))
         self.path.ranged_constraints.pop(constraint_index)
         self._refresh_after_timeline_constraint_edit(None)
         if self._has_path_changed_since(old_state):

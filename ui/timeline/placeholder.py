@@ -123,6 +123,7 @@ class TimelineProjection:
 class TimelineSelection:
     kind: str
     path_index: int | None = None
+    constraint_index: int | None = None
     constraint_key: str | None = None
     start_ordinal: int | None = None
     end_ordinal: int | None = None
@@ -411,6 +412,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     zoomOutRequested = Signal()
     pathItemClicked = Signal(int)
     constraintSpanClicked = Signal(str, int, int)
+    constraintSpanClickedWithIndex = Signal(int, str, int, int)
     emptyAreaClicked = Signal()
     structureItemCreateRequested = Signal(str, float)
     eventTriggerCreateRequested = Signal(float)
@@ -546,7 +548,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         )
 
     def _lane_metrics(self, row: TimelineRow, track_rect: QRectF) -> tuple[int, float, float, float]:
-        lane_count = max(1, int(row.lane_count))
+        lane_count = max(1, int(row.lane_count), self._preview_lane_count_for_row(row))
         available_h = max(1.0, track_rect.height())
         lane_gap = 3.0
         if lane_count > 1:
@@ -557,6 +559,79 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         lanes_block_h = lane_count * lane_h + total_lane_gap
         lanes_top = track_rect.top() + max(0.0, (available_h - lanes_block_h) / 2.0)
         return lane_count, lane_gap, lane_h, lanes_top
+
+    def _preview_lane_count_for_row(self, row: TimelineRow) -> int:
+        lane = self._active_constraint_preview_lane(row)
+        if lane is None:
+            return 1
+        return max(1, int(lane) + 1)
+
+    def _active_constraint_preview_lane(self, row: TimelineRow) -> int | None:
+        if row.title != "Constraints":
+            return None
+        if (
+            self._creating_constraint_key
+            and self._creating_constraint_preview is not None
+            and self._creating_constraint_key in row.constraint_positions_by_key
+        ):
+            start_ord, end_ord = self._creating_constraint_preview
+            return self._constraint_preview_lane(
+                row,
+                self._creating_constraint_key,
+                int(start_ord),
+                int(end_ord),
+            )
+        return None
+
+    def _constraint_preview_lane(
+        self,
+        row: TimelineRow,
+        key: str,
+        start_ordinal: int,
+        end_ordinal: int,
+        *,
+        ignore_index: int | None = None,
+    ) -> int | None:
+        positions = row.constraint_positions_by_key.get(str(key), [])
+        if not positions:
+            return None
+        start_s, end_s = _constraint_display_range_from_positions(
+            list(positions),
+            int(start_ordinal),
+            int(end_ordinal),
+        )
+        spans: list[TimelineSpan] = []
+        preview_span = TimelineSpan(
+            start_s_m=float(start_s),
+            end_s_m=float(end_s),
+            label="",
+            color=_constraint_color(str(key)),
+            constraint_key=str(key),
+            start_ordinal=int(start_ordinal),
+            end_ordinal=int(end_ordinal),
+        )
+        for span in row.spans:
+            if ignore_index is not None and span.constraint_index == ignore_index:
+                continue
+            spans.append(
+                TimelineSpan(
+                    start_s_m=float(span.start_s_m),
+                    end_s_m=float(span.end_s_m),
+                    label=str(span.label),
+                    color=str(span.color),
+                    constraint_index=span.constraint_index,
+                    constraint_key=span.constraint_key,
+                    start_ordinal=span.start_ordinal,
+                    end_ordinal=span.end_ordinal,
+                )
+            )
+        spans.append(preview_span)
+        spans.sort(key=lambda span: (span.start_s_m, span.end_s_m, span.label))
+        _assign_span_lanes(spans)
+        return int(preview_span.lane)
+
+    def _span_lane_for_display(self, span: TimelineSpan, row: TimelineRow) -> int:
+        return max(0, int(getattr(span, "lane", 0)))
 
     def _draw_ruler(self, painter: QPainter) -> None:
         top = TOP_PADDING
@@ -808,7 +883,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             else:
                 width = max(1.0, x1 - x0)
                 left_x = x0
-            lane_index = max(0, int(getattr(span, "lane", 0)))
+            lane_index = self._span_lane_for_display(span, row)
             bar_y = lanes_top + lane_index * (lane_h + lane_gap)
             rect = QRectF(left_x, bar_y, width, lane_h)
             color = QColor(span.color)
@@ -918,7 +993,15 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                     center_x = (x0 + x1) / 2.0
                     x0 = center_x - 4.0
                     x1 = center_x + 4.0
-                preview_rect = QRectF(x0, lanes_top, max(1.0, x1 - x0), lane_h)
+                lane_index = self._constraint_preview_lane(
+                    row,
+                    self._creating_constraint_key,
+                    int(start_ord),
+                    int(end_ord),
+                )
+                lane_index = 0 if lane_index is None else int(lane_index)
+                preview_y = lanes_top + lane_index * (lane_h + lane_gap)
+                preview_rect = QRectF(x0, preview_y, max(1.0, x1 - x0), lane_h)
                 if self._creating_constraint_preview_valid:
                     color = QColor(_constraint_color(self._creating_constraint_key))
                     color.setAlpha(120)
@@ -997,19 +1080,14 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         *,
         ignore_index: int | None = None,
     ) -> bool:
+        if str(key) not in row.constraint_positions_by_key:
+            return False
+        if not row.constraint_positions_by_key.get(str(key), []):
+            return False
         start_ordinal = int(start_ordinal)
         end_ordinal = int(end_ordinal)
         if start_ordinal > end_ordinal:
             start_ordinal, end_ordinal = end_ordinal, start_ordinal
-        for span in row.spans:
-            if span.constraint_key != key:
-                continue
-            if ignore_index is not None and span.constraint_index == ignore_index:
-                continue
-            span_start = int(span.start_ordinal or 1)
-            span_end = int(span.end_ordinal or span_start)
-            if start_ordinal <= span_end and end_ordinal >= span_start:
-                return False
         return True
 
     def _constraint_row(self) -> TimelineRow | None:
@@ -1399,11 +1477,19 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                     and span.start_ordinal is not None
                     and span.end_ordinal is not None
                 ):
-                    self.constraintSpanClicked.emit(
-                        str(span.constraint_key),
-                        int(span.start_ordinal),
-                        int(span.end_ordinal),
-                    )
+                    if span.constraint_index is not None:
+                        self.constraintSpanClickedWithIndex.emit(
+                            int(span.constraint_index),
+                            str(span.constraint_key),
+                            int(span.start_ordinal),
+                            int(span.end_ordinal),
+                        )
+                    else:
+                        self.constraintSpanClicked.emit(
+                            str(span.constraint_key),
+                            int(span.start_ordinal),
+                            int(span.end_ordinal),
+                        )
             finally:
                 self._pressed_constraint_span = None
                 self._pressed_constraint_action = None
@@ -1525,11 +1611,19 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                 and span.start_ordinal is not None
                 and span.end_ordinal is not None
             ):
-                self.constraintSpanClicked.emit(
-                    str(span.constraint_key),
-                    int(span.start_ordinal),
-                    int(span.end_ordinal),
-                )
+                if span.constraint_index is not None:
+                    self.constraintSpanClickedWithIndex.emit(
+                        int(span.constraint_index),
+                        str(span.constraint_key),
+                        int(span.start_ordinal),
+                        int(span.end_ordinal),
+                    )
+                else:
+                    self.constraintSpanClicked.emit(
+                        str(span.constraint_key),
+                        int(span.start_ordinal),
+                        int(span.end_ordinal),
+                    )
                 return
         self.emptyAreaClicked.emit()
 
@@ -1743,10 +1837,15 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         )
 
     def _is_span_selected(self, span: TimelineSpan) -> bool:
+        if not self._selection or self._selection.kind != "constraint":
+            return False
+        if self._selection.constraint_index is not None:
+            return bool(
+                span.constraint_index is not None
+                and int(span.constraint_index) == int(self._selection.constraint_index)
+            )
         return bool(
-            self._selection
-            and self._selection.kind == "constraint"
-            and span.constraint_key == self._selection.constraint_key
+            span.constraint_key == self._selection.constraint_key
             and span.start_ordinal == self._selection.start_ordinal
             and span.end_ordinal == self._selection.end_ordinal
         )
@@ -1815,6 +1914,7 @@ class TimelineDock(QFrame):
     playPauseToggled = Signal()
     pathItemSelected = Signal(int)
     constraintRangeSelected = Signal(str, int, int)
+    constraintRangeSelectedByIndex = Signal(int, str, int, int)
     selectionCleared = Signal()
     pathItemDeleteRequested = Signal(int)
     structureItemCreateRequested = Signal(str, float)
@@ -2019,6 +2119,12 @@ class TimelineDock(QFrame):
         self._track_canvas.zoomOutRequested.connect(lambda: self._adjust_zoom(-10))
         self._track_canvas.pathItemClicked.connect(self.select_path_index)
         self._track_canvas.pathItemClicked.connect(self.pathItemSelected)
+        self._track_canvas.constraintSpanClickedWithIndex.connect(
+            self.select_constraint_range_by_index
+        )
+        self._track_canvas.constraintSpanClickedWithIndex.connect(
+            self.constraintRangeSelectedByIndex
+        )
         self._track_canvas.constraintSpanClicked.connect(self.select_constraint_range)
         self._track_canvas.constraintSpanClicked.connect(self.constraintRangeSelected)
         self._track_canvas.emptyAreaClicked.connect(self._on_empty_area_clicked)
@@ -2296,6 +2402,28 @@ class TimelineDock(QFrame):
         self._selection = selection
         self._track_canvas.set_selection(self._selection)
 
+    def select_constraint_range_by_index(
+        self,
+        constraint_index: int | None,
+        key: str | None,
+        start_ordinal: int | None,
+        end_ordinal: int | None,
+    ) -> None:
+        if constraint_index is None or not key or start_ordinal is None or end_ordinal is None:
+            self.select_constraint_range(key, start_ordinal, end_ordinal)
+            return
+        selection = TimelineSelection(
+            kind="constraint",
+            constraint_index=int(constraint_index),
+            constraint_key=str(key),
+            start_ordinal=int(start_ordinal),
+            end_ordinal=int(end_ordinal),
+        )
+        if self._selection == selection:
+            return
+        self._selection = selection
+        self._track_canvas.set_selection(self._selection)
+
     def clear_selection(self) -> None:
         if self._selection is None:
             return
@@ -2316,18 +2444,30 @@ class TimelineDock(QFrame):
             if index is None or index < 0 or index >= len(getattr(self._path, "path_elements", []) or []):
                 self._selection = None
         elif self._selection.kind == "constraint":
+            index = self._selection.constraint_index
             key = self._selection.constraint_key
             start = self._selection.start_ordinal
             end = self._selection.end_ordinal
             found = False
-            for rc in getattr(self._path, "ranged_constraints", []) or []:
+            constraints = list(getattr(self._path, "ranged_constraints", []) or [])
+            if index is not None and 0 <= int(index) < len(constraints):
+                rc = constraints[int(index)]
                 if (
                     getattr(rc, "key", None) == key
                     and int(getattr(rc, "start_ordinal", -1)) == int(start)
                     and int(getattr(rc, "end_ordinal", -1)) == int(end)
                 ):
                     found = True
-                    break
+            if not found:
+                for idx, rc in enumerate(constraints):
+                    if (
+                        getattr(rc, "key", None) == key
+                        and int(getattr(rc, "start_ordinal", -1)) == int(start)
+                        and int(getattr(rc, "end_ordinal", -1)) == int(end)
+                    ):
+                        self._selection.constraint_index = int(idx)
+                        found = True
+                        break
             if not found:
                 self._selection = None
         self._track_canvas.set_selection(self._selection)

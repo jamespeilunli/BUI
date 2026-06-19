@@ -264,7 +264,7 @@ def test_timeline_constraint_create_update_delete_records_undo_and_autosave(
         window.close()
 
 
-def test_timeline_constraint_create_rejects_same_key_overlap(
+def test_timeline_constraint_create_allows_same_key_overlap(
     qt_app,
     install_main_window_path,
     process_events,
@@ -295,8 +295,49 @@ def test_timeline_constraint_create_rejects_same_key_overlap(
         )
         process_events()
 
-        assert len(window.path.ranged_constraints) == 1
-        assert not window.undo_manager.can_undo()
+        assert len(window.path.ranged_constraints) == 2
+        assert (
+            window.path.ranged_constraints[1].key,
+            window.path.ranged_constraints[1].start_ordinal,
+            window.path.ranged_constraints[1].end_ordinal,
+        ) == ("max_velocity_meters_per_sec", 2, 3)
+        assert window.sidebar._selected_constraint_ref == ("max_velocity_meters_per_sec", 2, 3)
+        assert window.sidebar._selected_constraint_index == 1
+        assert window.timeline._selection.constraint_index == 1
+        assert window.undo_manager.get_undo_description() == "Add constraint range"
+    finally:
+        window.close()
+
+
+def test_timeline_duplicate_constraint_selection_edits_selected_index(
+    qt_app,
+    install_main_window_path,
+    process_events,
+):
+    window = _new_window()
+    key = "max_velocity_meters_per_sec"
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(2.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(key=key, value=2.0, start_ordinal=1, end_ordinal=2),
+            RangedConstraint(key=key, value=1.5, start_ordinal=1, end_ordinal=2),
+        ],
+    )
+    try:
+        install_main_window_path(window, path)
+
+        window.timeline.constraintRangeSelectedByIndex.emit(1, key, 1, 2)
+        process_events()
+        window.sidebar.on_constraint_value_changed(1.25)
+        process_events()
+
+        assert window.path.ranged_constraints[0].value == 2.0
+        assert window.path.ranged_constraints[1].value == 1.25
+        assert window.sidebar._selected_constraint_index == 1
+        assert window.sidebar._selected_constraint_ref == (key, 1, 2)
     finally:
         window.close()
 

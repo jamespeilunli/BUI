@@ -66,6 +66,7 @@ class Sidebar(QWidget):
         self._last_selected_index: Optional[int] = None
         self._selected_index: Optional[int] = None
         self._selected_element_identity: Optional[int] = None
+        self._selected_constraint_index: Optional[int] = None
         self._selected_constraint_ref: Optional[tuple[str, int, int]] = None
         self._active_constraint_key: str = str(RANGED_CONSTRAINT_KEYS[0])
         self._last_emitted_selected_index: Optional[int] = None
@@ -283,13 +284,26 @@ class Sidebar(QWidget):
     def _selected_constraint(self) -> Optional[RangedConstraint]:
         if self.path is None or self._selected_constraint_ref is None:
             return None
+        constraints = list(getattr(self.path, "ranged_constraints", []) or [])
+        if self._selected_constraint_index is not None:
+            index = int(self._selected_constraint_index)
+            if 0 <= index < len(constraints):
+                rc = constraints[index]
+                key, start_ordinal, end_ordinal = self._selected_constraint_ref
+                if (
+                    getattr(rc, "key", None) == key
+                    and int(getattr(rc, "start_ordinal", -1)) == int(start_ordinal)
+                    and int(getattr(rc, "end_ordinal", -1)) == int(end_ordinal)
+                ):
+                    return rc
         key, start_ordinal, end_ordinal = self._selected_constraint_ref
-        for rc in getattr(self.path, "ranged_constraints", []) or []:
+        for idx, rc in enumerate(constraints):
             if (
                 getattr(rc, "key", None) == key
                 and int(getattr(rc, "start_ordinal", -1)) == int(start_ordinal)
                 and int(getattr(rc, "end_ordinal", -1)) == int(end_ordinal)
             ):
+                self._selected_constraint_index = int(idx)
                 return rc
         return None
 
@@ -317,16 +331,7 @@ class Sidebar(QWidget):
         new_start: int,
         new_end: int,
     ) -> bool:
-        if self.path is None:
-            return False
-        for other in getattr(self.path, "ranged_constraints", []) or []:
-            if other is constraint or getattr(other, "key", None) != new_key:
-                continue
-            other_start = int(getattr(other, "start_ordinal", 1))
-            other_end = int(getattr(other, "end_ordinal", other_start))
-            if new_start <= other_end and new_end >= other_start:
-                return False
-        return True
+        return self.path is not None and bool(new_key) and int(new_start) <= int(new_end)
 
     def set_path(self, path: Path) -> None:
         self.path = path
@@ -349,6 +354,7 @@ class Sidebar(QWidget):
         def _apply_selection() -> None:
             self.constraint_manager.clear_active_preview()
             self._selected_constraint_ref = None
+            self._selected_constraint_index = None
             self._selected_index = int(index)
             self._last_selected_index = int(index)
             self._selected_element_identity = id(self.path.path_elements[index])
@@ -363,6 +369,7 @@ class Sidebar(QWidget):
 
     def clear_selection(self) -> None:
         self._selected_index = None
+        self._selected_constraint_index = None
         self._selected_constraint_ref = None
         self._selected_element_identity = None
         self._last_selected_index = None
@@ -377,6 +384,7 @@ class Sidebar(QWidget):
                 self._show_constraint(rc)
                 return
             self._selected_constraint_ref = None
+            self._selected_constraint_index = None
 
         idx = self.get_selected_index()
         if idx is not None:
@@ -486,6 +494,11 @@ class Sidebar(QWidget):
         constraint.start_ordinal = int(new_start)
         constraint.end_ordinal = int(new_end)
         self._selected_constraint_ref = (str(new_key), int(new_start), int(new_end))
+        if self._selected_constraint_index is None:
+            for idx, rc in enumerate(getattr(self.path, "ranged_constraints", []) or []):
+                if rc is constraint:
+                    self._selected_constraint_index = int(idx)
+                    break
         self._configure_constraint_spinbox(str(new_key))
         self.modelChanged.emit()
         self.constraintRangePreviewRequested.emit(str(new_key), int(new_start), int(new_end))
@@ -521,6 +534,7 @@ class Sidebar(QWidget):
             return
 
         self._selected_constraint_ref = None
+        self._selected_constraint_index = None
         self._selected_element_identity = id(element)
         self._last_selected_index = idx
         self._show_element(element)
@@ -694,6 +708,7 @@ class Sidebar(QWidget):
         if self.path is None:
             return False
 
+        self._selected_constraint_index = None
         self._selected_constraint_ref = (str(key), int(start_ordinal), int(end_ordinal))
         self._selected_index = None
         self._selected_element_identity = None
@@ -702,12 +717,50 @@ class Sidebar(QWidget):
 
         rc = self._selected_constraint()
         if rc is None:
+            self._selected_constraint_index = None
             self._selected_constraint_ref = None
             self._show_empty_state()
             return False
 
         if emit_preview:
             self.constraintRangePreviewRequested.emit(str(key), int(start_ordinal), int(end_ordinal))
+        self._show_constraint(rc)
+        return True
+
+    def select_constraint_range_by_index(
+        self,
+        constraint_index: int,
+        key: str,
+        start_ordinal: int,
+        end_ordinal: int,
+        *,
+        emit_preview: bool = True,
+    ) -> bool:
+        if self.path is None:
+            return False
+        constraints = list(getattr(self.path, "ranged_constraints", []) or [])
+        index = int(constraint_index)
+        if index < 0 or index >= len(constraints):
+            return self.select_constraint_range(
+                key,
+                start_ordinal,
+                end_ordinal,
+                emit_preview=emit_preview,
+            )
+
+        rc = constraints[index]
+        selected_key = str(getattr(rc, "key", key))
+        selected_start = int(getattr(rc, "start_ordinal", start_ordinal))
+        selected_end = int(getattr(rc, "end_ordinal", end_ordinal))
+        self._selected_constraint_index = index
+        self._selected_constraint_ref = (selected_key, selected_start, selected_end)
+        self._selected_index = None
+        self._selected_element_identity = None
+        self._last_emitted_selected_index = None
+        self._suppress_element_selected_emit_once = False
+
+        if emit_preview:
+            self.constraintRangePreviewRequested.emit(selected_key, selected_start, selected_end)
         self._show_constraint(rc)
         return True
 

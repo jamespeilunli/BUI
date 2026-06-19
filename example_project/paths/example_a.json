@@ -55,11 +55,19 @@
     }
   ],
   "constraints": {
-    "max_velocity_meters_per_sec": [
+    "default_max_velocity_meters_per_sec": 2.2,
+    "max_acceleration_meters_per_sec2": [
       {
         "value": 1.0,
-        "start_ordinal": 2,
-        "end_ordinal": 5
+        "start_ordinal": 1,
+        "end_ordinal": 3
+      }
+    ],
+    "max_velocity_meters_per_sec": [
+      {
+        "value": 2.5,
+        "start_ordinal": 3,
+        "end_ordinal": 4
       }
     ]
   }

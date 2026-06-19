@@ -159,11 +159,11 @@ def test_constraint_creation_uses_visual_drag_interval():
     assert _constraint_creation_range_for_s(positions, 1.0, 1.0) == (3, 3)
 
 
-def test_same_key_overlap_is_rejected_but_other_keys_can_overlap(qt_app):
+def test_same_key_and_other_key_overlaps_are_allowed(qt_app):
     dock = TimelineDock(_path_with_constraints())
     row = next(row for row in dock._projection.rows if row.title == "Constraints")
 
-    assert not dock._track_canvas._constraint_range_available(
+    assert dock._track_canvas._constraint_range_available(
         row,
         "max_velocity_meters_per_sec",
         1,
@@ -182,6 +182,28 @@ def test_same_key_overlap_is_rejected_but_other_keys_can_overlap(qt_app):
         2,
         ignore_index=1,
     )
+
+
+def test_overlapping_same_key_constraints_stack_into_lanes():
+    key = "max_velocity_meters_per_sec"
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(2.0, 0.0),
+            TranslationTarget(4.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(key=key, value=2.0, start_ordinal=1, end_ordinal=2),
+            RangedConstraint(key=key, value=1.5, start_ordinal=2, end_ordinal=3),
+            RangedConstraint(key=key, value=1.0, start_ordinal=1, end_ordinal=3),
+        ],
+    )
+
+    projection = _build_projection(path, {}, use_sim_time=False)
+    row = next(row for row in projection.rows if row.title == "Constraints")
+
+    assert row.lane_count == 3
+    assert sorted(span.lane for span in row.spans) == [0, 1, 2]
 
 
 def test_constraint_hover_feedback_uses_move_and_resize_cursors(qt_app):
@@ -208,7 +230,7 @@ def test_constraint_hover_feedback_uses_move_and_resize_cursors(qt_app):
     assert canvas.toolTip().startswith("Resize start - ")
 
 
-def test_invalid_constraint_drag_preview_is_kept_for_feedback(qt_app):
+def test_overlapping_constraint_drag_preview_remains_valid(qt_app):
     key = "max_velocity_meters_per_sec"
     path = Path(
         path_elements=[
@@ -236,7 +258,33 @@ def test_invalid_constraint_drag_preview_is_kept_for_feedback(qt_app):
     canvas._update_constraint_drag_preview(canvas._x_for_s(positions[2]))
 
     assert canvas._pressed_constraint_preview == (3, 3)
-    assert not canvas._pressed_constraint_preview_valid
+    assert canvas._pressed_constraint_preview_valid
+
+
+def test_constraint_drag_preserves_original_lane_until_release(qt_app):
+    key = "max_velocity_meters_per_sec"
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(2.0, 0.0),
+            TranslationTarget(4.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(key=key, value=2.0, start_ordinal=1, end_ordinal=2),
+            RangedConstraint(key=key, value=1.5, start_ordinal=2, end_ordinal=3),
+        ],
+    )
+    dock = TimelineDock(path)
+    canvas = dock._track_canvas
+    row = next(row for row in dock._projection.rows if row.title == "Constraints")
+    span = next(span for span in row.spans if span.constraint_index == 1)
+    original_lane = span.lane
+
+    canvas._pressed_constraint_span = span
+    canvas._pressed_constraint_origin = (2, 3)
+    canvas._pressed_constraint_preview = (1, 2)
+
+    assert canvas._span_lane_for_display(span, row) == original_lane
 
 
 @pytest.mark.parametrize("path_index", [0, 1, 2, 3])
@@ -277,6 +325,30 @@ def test_timeline_constraint_selection_delete_keeps_range_delete_route(qt_app):
 
     assert path_deletes == []
     assert constraint_deletes == [(1, "max_acceleration_meters_per_sec2", 2, 3)]
+
+
+def test_duplicate_constraint_selection_delete_uses_constraint_index(qt_app):
+    key = "max_velocity_meters_per_sec"
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(2.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(key=key, value=2.0, start_ordinal=1, end_ordinal=2),
+            RangedConstraint(key=key, value=1.5, start_ordinal=1, end_ordinal=2),
+        ],
+    )
+    dock = TimelineDock(path)
+    constraint_deletes: list[tuple[int, str, int, int]] = []
+    dock.constraintRangeDeleteRequested.connect(
+        lambda index, key, start, end: constraint_deletes.append((index, key, start, end))
+    )
+
+    dock.select_constraint_range_by_index(1, key, 1, 2)
+    dock._on_delete_selection_requested()
+
+    assert constraint_deletes == [(1, key, 1, 2)]
 
 
 def test_structure_translation_placement_interpolates_between_anchors():
