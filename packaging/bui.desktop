@@ -1,9 +1,9 @@
 [Desktop Entry]
-Name=BLine
+Name=BUI
 Comment=FRC Robot Path Planning Tool
-Exec=bline
-Icon=bline
+Exec=bui
+Icon=bui
 Type=Application
 Categories=Development;Engineering;Robotics;
 Terminal=false
-StartupWMClass=bline
+StartupWMClass=bui

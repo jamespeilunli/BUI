@@ -11,13 +11,13 @@ if sys.stderr is None or sys.stdout is None:
         # Use AppData for logs (persistent, user-accessible)
         if sys.platform == "win32":
             appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
-            log_dir = os.path.join(appdata, "BLine", "logs")
+            log_dir = os.path.join(appdata, "BUI", "logs")
         else:
             # Fallback for other platforms
-            log_dir = os.path.expanduser("~/.bline/logs")
+            log_dir = os.path.expanduser("~/.bui/logs")
 
         os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(log_dir, "bline.log")
+        log_file = os.path.join(log_dir, "bui.log")
         sys.stderr = open(log_file, "w", encoding="utf-8", errors="ignore")
         sys.stdout = sys.stderr
     except Exception:

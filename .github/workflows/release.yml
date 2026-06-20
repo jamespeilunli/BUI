@@ -85,8 +85,8 @@ jobs:
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BLine-Linux-AppImage
-          path: BLine-x86_64.AppImage
+          name: BUI-Linux-AppImage
+          path: BUI-x86_64.AppImage
           if-no-files-found: error
 
   build-windows:
@@ -129,27 +129,27 @@ jobs:
       - name: ZIP the executable folder
         run: |
           cd packaging\dist
-          Compress-Archive -Path BLine -DestinationPath ..\..\BLine-${{ needs.check-release.outputs.version }}-Windows-Executable.zip
+          Compress-Archive -Path BUI -DestinationPath ..\..\BUI-${{ needs.check-release.outputs.version }}-Windows-Executable.zip
 
       - name: Upload Windows portable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: BLine-Windows-Portable
-          path: BLine-*-Windows-Portable.zip
+          name: BUI-Windows-Portable
+          path: BUI-*-Windows-Portable.zip
           if-no-files-found: error
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: BLine-Windows-Installer
-          path: packaging/BLine-*-Setup.exe
+          name: BUI-Windows-Installer
+          path: packaging/BUI-*-Setup.exe
           if-no-files-found: error
 
       - name: Upload Windows executable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: BLine-Windows-Executable
-          path: BLine-*-Windows-Executable.zip
+          name: BUI-Windows-Executable
+          path: BUI-*-Windows-Executable.zip
           if-no-files-found: error
 
   build-macos:
@@ -169,8 +169,8 @@ jobs:
       - name: Upload macOS DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BLine-macOS-DMG
-          path: BLine-*-macOS-arm64.dmg
+          name: BUI-macOS-DMG
+          path: BUI-*-macOS-arm64.dmg
           if-no-files-found: error
 
   create-release:
@@ -186,75 +186,75 @@ jobs:
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: BLine-Linux-AppImage
+          name: BUI-Linux-AppImage
           path: ./artifacts
 
       - name: Download Windows portable ZIP
         uses: actions/download-artifact@v4
         with:
-          name: BLine-Windows-Portable
+          name: BUI-Windows-Portable
           path: ./artifacts
 
       - name: Download Windows installer
         uses: actions/download-artifact@v4
         with:
-          name: BLine-Windows-Installer
+          name: BUI-Windows-Installer
           path: ./artifacts
 
       - name: Download Windows executable ZIP
         uses: actions/download-artifact@v4
         with:
-          name: BLine-Windows-Executable
+          name: BUI-Windows-Executable
           path: ./artifacts
 
       - name: Download macOS DMG
         uses: actions/download-artifact@v4
         with:
-          name: BLine-macOS-DMG
+          name: BUI-macOS-DMG
           path: ./artifacts
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ needs.check-release.outputs.version }}
-          name: BLine v${{ needs.check-release.outputs.version }}${{ needs.check-release.outputs.is_prerelease == 'true' && ' (Preview)' || '' }}
+          name: BUI v${{ needs.check-release.outputs.version }}${{ needs.check-release.outputs.is_prerelease == 'true' && ' (Preview)' || '' }}
           body: |
-            ## BLine v${{ needs.check-release.outputs.version }}
+            ## BUI v${{ needs.check-release.outputs.version }}
             ${{ needs.check-release.outputs.is_prerelease == 'true' && '> ⚠️ **This is a pre-release preview.** It may contain bugs or incomplete features. Use in production at your own risk.' || '' }}
 
             ### Downloads
 
             **macOS (Apple Silicon):**
-            - `BLine-${{ needs.check-release.outputs.version }}-macOS-arm64.dmg` - Disk image
+            - `BUI-${{ needs.check-release.outputs.version }}-macOS-arm64.dmg` - Disk image
 
             **Linux:**
-            - `BLine-x86_64.AppImage` - Single portable file
+            - `BUI-x86_64.AppImage` - Single portable file
 
             **Windows:**
-            - `BLine-${{ needs.check-release.outputs.version }}-Setup.exe` - Installer (recommended)
-            - `BLine-${{ needs.check-release.outputs.version }}-Windows-Portable.zip` - Portable ZIP (no install)
-            - `BLine-${{ needs.check-release.outputs.version }}-Windows-Executable.zip` - Executable folder
+            - `BUI-${{ needs.check-release.outputs.version }}-Setup.exe` - Installer (recommended)
+            - `BUI-${{ needs.check-release.outputs.version }}-Windows-Portable.zip` - Portable ZIP (no install)
+            - `BUI-${{ needs.check-release.outputs.version }}-Windows-Executable.zip` - Executable folder
 
             ### Installation
 
             **macOS:**
-            1. Download `BLine-${{ needs.check-release.outputs.version }}-macOS-arm64.dmg`
-            2. Open the DMG and drag BLine.app to Applications
+            1. Download `BUI-${{ needs.check-release.outputs.version }}-macOS-arm64.dmg`
+            2. Open the DMG and drag BUI.app to Applications
             3. Launch from Applications
 
             **Linux:**
-            1. Download `BLine-x86_64.AppImage`
-            2. Make it executable: `chmod +x BLine-x86_64.AppImage`
-            3. Run: `./BLine-x86_64.AppImage`
+            1. Download `BUI-x86_64.AppImage`
+            2. Make it executable: `chmod +x BUI-x86_64.AppImage`
+            3. Run: `./BUI-x86_64.AppImage`
 
             **Windows (Installer):**
-            1. Download and run `BLine-${{ needs.check-release.outputs.version }}-Setup.exe`
+            1. Download and run `BUI-${{ needs.check-release.outputs.version }}-Setup.exe`
             2. Follow the installation wizard
             3. Launch from Start Menu
 
             **Windows (Portable):**
             1. Download and extract the portable ZIP
-            2. Run `BLine.exe`
+            2. Run `BUI.exe`
             3. No installation required!
 
             ---

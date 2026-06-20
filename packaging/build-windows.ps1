@@ -1,4 +1,4 @@
-# BLine Windows Build Script (PowerShell)
+# BUI Windows Build Script (PowerShell)
 # This script creates a Windows executable using PyInstaller
 
 param(
@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Building BLine for Windows" -ForegroundColor Cyan
+Write-Host "Building BUI for Windows" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -49,7 +49,7 @@ if (-not $SkipInstall) {
 
 # Convert PNG icon to ICO if needed
 $IconPath = Join-Path $ProjectDir "assets\rebel_logo.png"
-$IcoPath = Join-Path $ScriptDir "bline.ico"
+$IcoPath = Join-Path $ScriptDir "bui.ico"
 
 Write-Host "Creating application icon..." -ForegroundColor Yellow
 if (Test-Path $IconPath) {
@@ -69,26 +69,26 @@ Write-Host "Building executable with PyInstaller..." -ForegroundColor Yellow
 Set-Location $ScriptDir
 
 # Create updated spec file with icon
-$SpecContent = Get-Content "bline.spec" -Raw
+$SpecContent = Get-Content "bui.spec" -Raw
 if (Test-Path $IcoPath) {
     $SpecContent = $SpecContent -replace "icon=str\(assets_dir / 'rebel_logo\.png'\).*", "icon='$($IcoPath.Replace('\', '\\'))',"
-    Set-Content -Path "bline.spec" -Value $SpecContent
+    Set-Content -Path "bui.spec" -Value $SpecContent
 }
 
-pyinstaller --clean --noconfirm bline.spec
+pyinstaller --clean --noconfirm bui.spec
 
 # Check if build succeeded
-$ExePath = Join-Path $DistDir "BLine\BLine.exe"
+$ExePath = Join-Path $DistDir "BUI\BUI.exe"
 if (Test-Path $ExePath) {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Green
     Write-Host "Build complete!" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "Executable location: $DistDir\BLine\" -ForegroundColor Cyan
+    Write-Host "Executable location: $DistDir\BUI\" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "To run the application:" -ForegroundColor Yellow
-    Write-Host "  .\windows\dist\BLine\BLine.exe" -ForegroundColor White
+    Write-Host "  .\windows\dist\BUI\BUI.exe" -ForegroundColor White
     Write-Host ""
     Write-Host "To create an installer, run:" -ForegroundColor Yellow
     Write-Host "  .\windows\create-installer.ps1" -ForegroundColor White

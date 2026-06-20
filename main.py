@@ -26,17 +26,28 @@ from ui.resources import ensure_assets_loaded
 
 faulthandler.enable()
 
+APP_ORGANIZATION_NAME = "BUI"
+APP_APPLICATION_NAME = "BUI"
+APP_DISPLAY_NAME = "BUI"
+
 
 def get_package_root() -> Path:
     """Get the root directory of the installed package."""
     return Path(__file__).parent
 
 
+def configure_application_identity(app: QApplication) -> None:
+    """Set Qt identity before QSettings-backed components are created."""
+    app.setOrganizationName(APP_ORGANIZATION_NAME)
+    app.setApplicationName(APP_APPLICATION_NAME)
+    app.setApplicationDisplayName(APP_DISPLAY_NAME)
+
+
 def find_icon_path() -> Path | None:
     """Find the icon file, checking multiple possible locations."""
     possible_paths = [
         get_package_root() / "assets" / "rebel_logo.png",  # Dev / source install
-        Path(sys.prefix) / "bline_assets" / "rebel_logo.png",  # Installed via pip
+        Path(sys.prefix) / "bui_assets" / "rebel_logo.png",  # Installed via pip
         Path(__file__).parent.parent / "assets" / "rebel_logo.png",  # Alternate structure
     ]
     for path in possible_paths:
@@ -59,10 +70,10 @@ def get_icon_for_shortcut() -> str | None:
         # macOS needs .icns format - convert using sips
         try:
             # Create a temporary .icns file
-            icns_path = Path(tempfile.gettempdir()) / "bline_icon.icns"
+            icns_path = Path(tempfile.gettempdir()) / "bui_icon.icns"
 
             # First create an iconset directory
-            iconset_path = Path(tempfile.gettempdir()) / "bline.iconset"
+            iconset_path = Path(tempfile.gettempdir()) / "bui.iconset"
             iconset_path.mkdir(exist_ok=True)
 
             # Use sips to resize and create the required icon sizes
@@ -115,9 +126,9 @@ def get_icon_for_shortcut() -> str | None:
         # Windows shortcuts generally want an .ico for reliable display.
         try:
             # Store in a stable user location (temp dirs can be cleaned).
-            ico_dir = Path.home() / ".bline"
+            ico_dir = Path.home() / ".bui"
             ico_dir.mkdir(parents=True, exist_ok=True)
-            ico_path = ico_dir / "bline_icon.ico"
+            ico_path = ico_dir / "bui_icon.ico"
             # Generate an .ico using Qt (no extra deps).
             from PySide6.QtGui import QImage
 
@@ -143,16 +154,16 @@ def get_icon_for_shortcut() -> str | None:
         return str(png_path)
 
 
-def find_bline_command() -> str | None:
-    """Find the installed `bline` command (pipx or pip)."""
+def find_bui_command() -> str | None:
+    """Find the installed `bui` command (pipx or pip)."""
     import shutil
 
-    bline_cmd = shutil.which("bline")
-    if bline_cmd:
-        return bline_cmd
+    bui_cmd = shutil.which("bui")
+    if bui_cmd:
+        return bui_cmd
 
     # Common pipx location on macOS/Linux
-    pipx_bin = Path.home() / ".local" / "bin" / "bline"
+    pipx_bin = Path.home() / ".local" / "bin" / "bui"
     if pipx_bin.exists():
         return str(pipx_bin)
 
@@ -204,7 +215,7 @@ def create_macos_app_bundle(
         "  <dict>",
         "    <key>CFBundleDevelopmentRegion</key><string>en</string>",
         "    <key>CFBundleExecutable</key><string>%s</string>" % app_name,
-        "    <key>CFBundleIdentifier</key><string>com.bline.gui</string>",
+        "    <key>CFBundleIdentifier</key><string>org.frc2638.bui</string>",
         "    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>",
         "    <key>CFBundleName</key><string>%s</string>" % app_name,
         "    <key>CFBundlePackageType</key><string>APPL</string>",
@@ -325,12 +336,13 @@ def create_shortcut_dialog() -> int:
         return 1
 
     app = QApplication.instance() or QApplication(sys.argv)
+    configure_application_identity(cast(QApplication, app))
 
     # Apply dark theme for consistency
     set_dark_theme(cast(QApplication, app))
 
     dialog = QDialog()
-    dialog.setWindowTitle("BLine - Create Shortcut")
+    dialog.setWindowTitle("BUI - Create Shortcut")
     dialog.setFixedSize(350, 200)
 
     layout = QVBoxLayout(dialog)
@@ -344,7 +356,7 @@ def create_shortcut_dialog() -> int:
         icon_label.setPixmap(pixmap)
         header_layout.addWidget(icon_label)
 
-    title_label = QLabel("Create BLine Shortcut")
+    title_label = QLabel("Create BUI Shortcut")
     title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
     header_layout.addWidget(title_label)
     header_layout.addStretch()
@@ -403,12 +415,12 @@ def create_shortcut_dialog() -> int:
             return
 
         try:
-            bline_cmd = find_bline_command()
-            if not bline_cmd:
+            bui_cmd = find_bui_command()
+            if not bui_cmd:
                 QMessageBox.critical(
                     dialog,
                     "Not Installed",
-                    "BLine is not installed. Please install with:\n\npipx install bline",
+                    "BUI is not installed. Please install with:\n\npipx install bui",
                 )
                 return
 
@@ -417,11 +429,11 @@ def create_shortcut_dialog() -> int:
             # macOS: pyshortcuts only creates Desktop .app bundles and does not support "Start Menu/Applications".
             # Create real .app bundles ourselves for Desktop and/or ~/Applications.
             if system == "Darwin":
-                launch_cmd = f'"{bline_cmd}"'
+                launch_cmd = f'"{bui_cmd}"'
                 if desktop_cb.isChecked():
                     create_macos_app_bundle(
                         app_dir=Path.home() / "Desktop",
-                        app_name="BLine",
+                        app_name="BUI",
                         launch_cmd=launch_cmd,
                         icns_path=icon,
                     )
@@ -436,24 +448,24 @@ def create_shortcut_dialog() -> int:
                         apps_dir.mkdir(parents=True, exist_ok=True)
                     create_macos_app_bundle(
                         app_dir=apps_dir,
-                        app_name="BLine",
+                        app_name="BUI",
                         launch_cmd=launch_cmd,
                         icns_path=icon,
                     )
             else:
                 # Windows/Linux shortcut creation
                 if system == "Windows":
-                    # On Windows, create a VBS launcher that runs bline without a console window,
+                    # On Windows, create a VBS launcher that runs bui without a console window,
                     # then point the .lnk shortcut at the VBS.
 
-                    # Ensure ~/.bline exists for our helper files
-                    bline_data_dir = Path.home() / ".bline"
-                    bline_data_dir.mkdir(parents=True, exist_ok=True)
+                    # Ensure ~/.bui exists for our helper files
+                    bui_data_dir = Path.home() / ".bui"
+                    bui_data_dir.mkdir(parents=True, exist_ok=True)
 
-                    # Create a VBS wrapper that launches bline invisibly (no console flash)
-                    vbs_path = bline_data_dir / "launch_bline.vbs"
+                    # Create a VBS wrapper that launches bui invisibly (no console flash)
+                    vbs_path = bui_data_dir / "launch_bui.vbs"
                     vbs_content = f'''Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run """{bline_cmd}""", 0, False
+WshShell.Run """{bui_cmd}""", 0, False
 '''
                     vbs_path.write_text(vbs_content, encoding="utf-8")
 
@@ -467,7 +479,7 @@ WshShell.Run """{bline_cmd}""", 0, False
 
                     created_paths: list[str] = []
                     if desktop_cb.isChecked():
-                        dest = desktop_dir / "BLine.lnk"
+                        dest = desktop_dir / "BUI.lnk"
                         create_windows_lnk(
                             shortcut_path=dest,
                             target_path=exe,
@@ -477,7 +489,7 @@ WshShell.Run """{bline_cmd}""", 0, False
                         )
                         created_paths.append(str(dest))
                     if startmenu_checked:
-                        dest = startmenu_dir / "BLine.lnk"
+                        dest = startmenu_dir / "BUI.lnk"
                         create_windows_lnk(
                             shortcut_path=dest,
                             target_path=exe,
@@ -489,8 +501,8 @@ WshShell.Run """{bline_cmd}""", 0, False
                 else:
                     # Linux: rely on pyshortcuts
                     make_shortcut(
-                        script=bline_cmd,
-                        name="BLine",
+                        script=bui_cmd,
+                        name="BUI",
                         description="FRC Robot Path Planning Tool",
                         icon=icon,
                         desktop=desktop_cb.isChecked(),
@@ -577,6 +589,7 @@ def run_app(argv: Sequence[str] | None = None) -> int:
     ensure_assets_loaded()
     existing_app = QApplication.instance()
     app = existing_app or QApplication(list(argv) if argv is not None else sys.argv)
+    configure_application_identity(cast(QApplication, app))
 
     set_dark_theme(cast(QApplication, app))
 
@@ -587,12 +600,12 @@ def run_app(argv: Sequence[str] | None = None) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="bline", description="BLine - FRC Robot Path Planning Tool"
+        prog="bui", description="BUI - FRC Robot Path Planning Tool"
     )
     parser.add_argument(
         "--create-shortcut",
         action="store_true",
-        help="Create a desktop/start menu shortcut for BLine",
+        help="Create a desktop/start menu shortcut for BUI",
     )
 
     args, remaining = parser.parse_known_args(argv)

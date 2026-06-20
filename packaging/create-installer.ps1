@@ -1,17 +1,17 @@
-# BLine Inno Setup Installer Creation Script
+# BUI Inno Setup Installer Creation Script
 # This script compiles the Inno Setup script to create a Windows installer
 
 $ErrorActionPreference = "Stop"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Creating BLine Windows Installer" -ForegroundColor Cyan
+Write-Host "Creating BUI Windows Installer" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Get script directory
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Split-Path -Parent $ScriptDir
-$DistDir = Join-Path $ScriptDir "dist\BLine"
+$DistDir = Join-Path $ScriptDir "dist\BUI"
 
 # Get version from pyproject.toml
 $PyProjectPath = Join-Path $ProjectDir "pyproject.toml"
@@ -74,7 +74,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "========================================" -ForegroundColor Green
     Write-Host ""
 
-    $InstallerPath = Get-ChildItem -Path $ScriptDir -Filter "BLine-*-Setup.exe" | Select-Object -First 1
+    $InstallerPath = Get-ChildItem -Path $ScriptDir -Filter "BUI-*-Setup.exe" | Select-Object -First 1
     if ($InstallerPath) {
         Write-Host "Installer location: $($InstallerPath.FullName)" -ForegroundColor Cyan
         Write-Host "Size: $([math]::Round($InstallerPath.Length / 1MB, 2)) MB" -ForegroundColor Cyan
