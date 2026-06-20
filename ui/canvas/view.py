@@ -2258,7 +2258,7 @@ class CanvasView(QGraphicsView):
         if key in TRANSLATION_KEYS:
             domain_types = (TranslationTarget, Waypoint)
         else:
-            domain_types = (Waypoint, RotationTarget, EventTrigger)
+            domain_types = (Waypoint, RotationTarget)
 
         ordinal = 0
         highlight_indices: List[int] = []

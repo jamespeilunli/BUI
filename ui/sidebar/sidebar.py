@@ -31,7 +31,9 @@ from .utils import (
     ELEMENT_TYPE_LABELS,
     ElementType,
     RANGED_CONSTRAINT_KEYS,
+    ROTATION_CONSTRAINT_KEYS,
     SPINNER_METADATA,
+    TRANSLATION_CONSTRAINT_KEYS,
 )
 from .widgets import NoWheelDoubleSpinBox
 
@@ -205,10 +207,7 @@ class Sidebar(QWidget):
         self.constraint_type_combo = QComboBox()
         self.constraint_type_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._constraint_type_key_by_label: dict[str, str] = {}
-        for key in RANGED_CONSTRAINT_KEYS:
-            label = self._constraint_label_for_key(str(key))
-            self._constraint_type_key_by_label[label] = str(key)
-            self.constraint_type_combo.addItem(label)
+        self._rebuild_constraint_type_combo_for_key(str(RANGED_CONSTRAINT_KEYS[0]))
         self.constraint_type_combo.currentTextChanged.connect(self.on_constraint_type_change)
         constraint_layout.addRow("Type", self.constraint_type_combo)
 
@@ -314,6 +313,41 @@ class Sidebar(QWidget):
         meta = SPINNER_METADATA.get(str(key), {})
         return str(meta.get("label", key)).replace("<br/>", " ")
 
+    def _constraint_domain_keys_for_key(self, key: str) -> list[str]:
+        if str(key) in TRANSLATION_CONSTRAINT_KEYS:
+            return [
+                str(item)
+                for item in RANGED_CONSTRAINT_KEYS
+                if item in TRANSLATION_CONSTRAINT_KEYS
+            ]
+        if str(key) in ROTATION_CONSTRAINT_KEYS:
+            return [str(item) for item in RANGED_CONSTRAINT_KEYS if item in ROTATION_CONSTRAINT_KEYS]
+        return []
+
+    def _constraint_keys_share_domain(self, left: str, right: str) -> bool:
+        return bool(
+            (
+                str(left) in TRANSLATION_CONSTRAINT_KEYS
+                and str(right) in TRANSLATION_CONSTRAINT_KEYS
+            )
+            or (str(left) in ROTATION_CONSTRAINT_KEYS and str(right) in ROTATION_CONSTRAINT_KEYS)
+        )
+
+    def _rebuild_constraint_type_combo_for_key(self, key: str) -> None:
+        allowed_keys = self._constraint_domain_keys_for_key(str(key))
+        if not allowed_keys:
+            allowed_keys = [str(item) for item in RANGED_CONSTRAINT_KEYS]
+        try:
+            self.constraint_type_combo.blockSignals(True)
+            self.constraint_type_combo.clear()
+            self._constraint_type_key_by_label = {}
+            for allowed_key in allowed_keys:
+                label = self._constraint_label_for_key(str(allowed_key))
+                self._constraint_type_key_by_label[label] = str(allowed_key)
+                self.constraint_type_combo.addItem(label)
+        finally:
+            self.constraint_type_combo.blockSignals(False)
+
     def _set_constraint_type_combo_key(self, key: str) -> None:
         label = self._constraint_label_for_key(str(key))
         try:
@@ -331,7 +365,13 @@ class Sidebar(QWidget):
         new_start: int,
         new_end: int,
     ) -> bool:
-        return self.path is not None and bool(new_key) and int(new_start) <= int(new_end)
+        old_key = str(getattr(constraint, "key", ""))
+        return bool(
+            self.path is not None
+            and bool(new_key)
+            and self._constraint_keys_share_domain(old_key, str(new_key))
+            and int(new_start) <= int(new_end)
+        )
 
     def set_path(self, path: Path) -> None:
         self.path = path
@@ -443,6 +483,7 @@ class Sidebar(QWidget):
     def _show_constraint(self, constraint: RangedConstraint) -> None:
         key = str(getattr(constraint, "key", ""))
         self._active_constraint_key = key or self.get_active_constraint_key()
+        self._rebuild_constraint_type_combo_for_key(self._active_constraint_key)
         self._set_constraint_type_combo_key(self._active_constraint_key)
 
         self.property_editor.hide_all_properties()
@@ -476,6 +517,11 @@ class Sidebar(QWidget):
 
         old_key = str(getattr(constraint, "key", ""))
         if old_key == new_key:
+            return
+        if not self._constraint_keys_share_domain(old_key, str(new_key)):
+            self._active_constraint_key = old_active_key
+            self._set_constraint_type_combo_key(old_key)
+            self.constraintTypeChanged.emit(old_active_key)
             return
 
         _domain, count = self.constraint_manager.get_domain_info_for_key(str(new_key))

@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import List, Tuple
 
 from models.path_model import (
-    EventTrigger,
     Path,
     PathElement,
     RotationTarget,
@@ -29,7 +28,7 @@ def get_constraint_domain_elements(path: Path | None, key: str) -> List[PathElem
     return [
         element
         for element in path.path_elements
-        if isinstance(element, (Waypoint, RotationTarget, EventTrigger))
+        if isinstance(element, (Waypoint, RotationTarget))
     ]
 
 
@@ -46,7 +45,6 @@ def get_constraint_domain_labels(path: Path | None, key: str) -> List[str]:
         TranslationTarget: "T",
         Waypoint: "W",
         RotationTarget: "R",
-        EventTrigger: "E",
     }
 
     labels: List[str] = []

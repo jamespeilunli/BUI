@@ -7,6 +7,9 @@ import pytest
 from models.path_model import EventTrigger, Path, RangedConstraint, RotationTarget, TranslationTarget
 from models.simulation import (
     ChassisSpeeds,
+    _active_rotation_limit,
+    _active_translation_limit,
+    _build_global_rotation_keyframes,
     limit_acceleration,
     shortest_angular_distance,
     simulate_path,
@@ -97,6 +100,52 @@ def test_simulation_applies_translation_and_rotation_ranged_constraints():
 
     assert constrained_result.total_time_s > unconstrained_result.total_time_s
     assert constrained_result.progress_by_time
+
+
+def test_rotation_constraints_ignore_event_trigger_ordinals_in_simulation():
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            EventTrigger(t_ratio=0.25, lib_key="event"),
+            RotationTarget(rotation_radians=math.pi, t_ratio=0.5),
+            TranslationTarget(4.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(
+                key="max_velocity_deg_per_sec",
+                value=45.0,
+                start_ordinal=1,
+                end_ordinal=1,
+            )
+        ],
+    )
+
+    frames = _build_global_rotation_keyframes(path, [0, 3], [0.0, 4.0])
+
+    assert [(frame.s_m, frame.event_ordinal_1b) for frame in frames] == [(2.0, 1)]
+    assert _active_rotation_limit(path, frames, "max_velocity_deg_per_sec", 0.5) == 45.0
+
+
+def test_translation_constraints_ignore_rotation_and_event_trigger_ordinals_in_simulation():
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            RotationTarget(rotation_radians=math.pi / 2.0, t_ratio=0.25),
+            EventTrigger(t_ratio=0.5, lib_key="event"),
+            TranslationTarget(4.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(
+                key="max_velocity_meters_per_sec",
+                value=1.0,
+                start_ordinal=2,
+                end_ordinal=2,
+            )
+        ],
+    )
+
+    assert _active_translation_limit(path, "max_velocity_meters_per_sec", 2) == 1.0
+    assert _active_translation_limit(path, "max_velocity_meters_per_sec", 1) is None
 
 
 def test_simulation_does_not_allow_ranged_constraint_to_exceed_whole_path_limit():

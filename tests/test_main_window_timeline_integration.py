@@ -153,6 +153,50 @@ def test_timeline_structure_create_adds_waypoint_selects_it_and_records_undo(
         window.close()
 
 
+def test_timeline_waypoint_insert_preserves_constraint_visual_endpoints(
+    qt_app,
+    monkeypatch,
+    install_main_window_path,
+    process_events,
+):
+    window = _new_window()
+    monkeypatch.setattr(
+        "ui.main_window.window.resolve_structure_placement_for_time",
+        lambda path, config, time_s, element_type: StructurePlacement(
+            insert_index=1,
+            x_m=2.0,
+            y_m=0.0,
+        ),
+    )
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(4.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(
+                key="max_velocity_meters_per_sec",
+                value=2.0,
+                start_ordinal=2,
+                end_ordinal=2,
+            )
+        ],
+    )
+    try:
+        install_main_window_path(window, path)
+
+        window._on_timeline_structure_item_create_requested("waypoint", 0.5)
+        process_events()
+
+        assert isinstance(window.path.path_elements[1], Waypoint)
+        assert (
+            window.path.ranged_constraints[0].start_ordinal,
+            window.path.ranged_constraints[0].end_ordinal,
+        ) == (2, 3)
+    finally:
+        window.close()
+
+
 def test_timeline_event_trigger_create_and_move_preserve_selection_and_undo(
     qt_app,
     monkeypatch,
@@ -338,6 +382,121 @@ def test_timeline_duplicate_constraint_selection_edits_selected_index(
         assert window.path.ranged_constraints[1].value == 1.25
         assert window.sidebar._selected_constraint_index == 1
         assert window.sidebar._selected_constraint_ref == (key, 1, 2)
+    finally:
+        window.close()
+
+
+def test_sidebar_constraint_type_combo_stays_within_translation_domain(
+    qt_app,
+    install_main_window_path,
+    process_events,
+):
+    window = _new_window()
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            TranslationTarget(2.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(
+                key="max_velocity_meters_per_sec",
+                value=2.0,
+                start_ordinal=1,
+                end_ordinal=2,
+            )
+        ],
+    )
+    try:
+        install_main_window_path(window, path)
+        window.sidebar.select_constraint_range_by_index(0, "max_velocity_meters_per_sec", 1, 2)
+        process_events()
+
+        labels = [
+            window.sidebar.constraint_type_combo.itemText(index)
+            for index in range(window.sidebar.constraint_type_combo.count())
+        ]
+
+        assert labels == [
+            window.sidebar._constraint_label_for_key("max_velocity_meters_per_sec"),
+            window.sidebar._constraint_label_for_key("max_acceleration_meters_per_sec2"),
+        ]
+    finally:
+        window.close()
+
+
+def test_sidebar_constraint_type_combo_stays_within_rotation_domain(
+    qt_app,
+    install_main_window_path,
+    process_events,
+):
+    window = _new_window()
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            RotationTarget(rotation_radians=0.5, t_ratio=0.5),
+            TranslationTarget(2.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(
+                key="max_velocity_deg_per_sec",
+                value=90.0,
+                start_ordinal=1,
+                end_ordinal=1,
+            )
+        ],
+    )
+    try:
+        install_main_window_path(window, path)
+        window.sidebar.select_constraint_range_by_index(0, "max_velocity_deg_per_sec", 1, 1)
+        process_events()
+
+        labels = [
+            window.sidebar.constraint_type_combo.itemText(index)
+            for index in range(window.sidebar.constraint_type_combo.count())
+        ]
+
+        assert labels == [
+            window.sidebar._constraint_label_for_key("max_velocity_deg_per_sec"),
+            window.sidebar._constraint_label_for_key("max_acceleration_deg_per_sec2"),
+        ]
+    finally:
+        window.close()
+
+
+def test_sidebar_rejects_programmatic_cross_domain_constraint_type_change(
+    qt_app,
+    install_main_window_path,
+    process_events,
+):
+    window = _new_window()
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            RotationTarget(rotation_radians=0.5, t_ratio=0.5),
+            TranslationTarget(2.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(
+                key="max_velocity_meters_per_sec",
+                value=2.0,
+                start_ordinal=1,
+                end_ordinal=2,
+            )
+        ],
+    )
+    try:
+        install_main_window_path(window, path)
+        window.sidebar.select_constraint_range_by_index(0, "max_velocity_meters_per_sec", 1, 2)
+        process_events()
+
+        window.sidebar._constraint_type_key_by_label["Rotation Velocity"] = "max_velocity_deg_per_sec"
+        window.sidebar.on_constraint_type_change("Rotation Velocity")
+
+        assert window.path.ranged_constraints[0].key == "max_velocity_meters_per_sec"
+        assert (
+            window.path.ranged_constraints[0].start_ordinal,
+            window.path.ranged_constraints[0].end_ordinal,
+        ) == (1, 2)
     finally:
         window.close()
 

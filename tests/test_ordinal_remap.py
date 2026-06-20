@@ -44,13 +44,13 @@ class TestDomainHelpers:
         elems = [t, r, w, e]
         assert _translation_domain(elems) == [id(t), id(w)]
 
-    def test_rotation_domain_includes_waypoint_rotation_event(self):
+    def test_rotation_domain_includes_rotation_and_waypoint_only(self):
         t = TranslationTarget()
         w = Waypoint()
         r = RotationTarget()
         e = EventTrigger()
         elems = [t, r, w, e]
-        assert _rotation_domain(elems) == [id(r), id(w), id(e)]
+        assert _rotation_domain(elems) == [id(r), id(w)]
 
     def test_empty_list(self):
         assert _translation_domain([]) == []
@@ -114,6 +114,89 @@ class TestAddition:
 
         assert rc.start_ordinal == 1
         assert rc.end_ordinal == 3
+
+    def test_insert_between_visual_endpoints_expands_translation_single_segment(self):
+        """A new anchor inside a displayed segment stays inside the constraint."""
+        t1 = TranslationTarget()
+        t2 = TranslationTarget()
+        rc = RangedConstraint(
+            key="max_velocity_meters_per_sec", value=1.0,
+            start_ordinal=2, end_ordinal=2,
+        )
+        old_elements = [t1, t2]
+        w_new = Waypoint()
+        path = _make_path(t1, w_new, t2, constraints=[rc])
+
+        remap_ranged_constraints(path, old_elements)
+
+        assert rc.start_ordinal == 2
+        assert rc.end_ordinal == 3
+
+    def test_insert_between_visual_endpoints_expands_later_translation_segment(self):
+        t1 = TranslationTarget()
+        t2 = TranslationTarget()
+        t3 = TranslationTarget()
+        rc = RangedConstraint(
+            key="max_velocity_meters_per_sec", value=1.0,
+            start_ordinal=3, end_ordinal=3,
+        )
+        old_elements = [t1, t2, t3]
+        w_new = Waypoint()
+        path = _make_path(t1, t2, w_new, t3, constraints=[rc])
+
+        remap_ranged_constraints(path, old_elements)
+
+        assert rc.start_ordinal == 3
+        assert rc.end_ordinal == 4
+
+    def test_insert_before_visual_endpoint_shifts_later_translation_segment(self):
+        t1 = TranslationTarget()
+        t2 = TranslationTarget()
+        t3 = TranslationTarget()
+        rc = RangedConstraint(
+            key="max_velocity_meters_per_sec", value=1.0,
+            start_ordinal=3, end_ordinal=3,
+        )
+        old_elements = [t1, t2, t3]
+        w_new = Waypoint()
+        path = _make_path(t1, w_new, t2, t3, constraints=[rc])
+
+        remap_ranged_constraints(path, old_elements)
+
+        assert rc.start_ordinal == 4
+        assert rc.end_ordinal == 4
+
+    def test_insert_between_visual_endpoints_expands_rotation_single_segment(self):
+        r1 = RotationTarget()
+        r2 = RotationTarget()
+        rc = RangedConstraint(
+            key="max_velocity_deg_per_sec", value=90.0,
+            start_ordinal=2, end_ordinal=2,
+        )
+        old_elements = [r1, r2]
+        w_new = Waypoint()
+        path = _make_path(r1, w_new, r2, constraints=[rc])
+
+        remap_ranged_constraints(path, old_elements)
+
+        assert rc.start_ordinal == 2
+        assert rc.end_ordinal == 3
+
+    def test_event_trigger_inside_visual_span_does_not_change_translation_constraint(self):
+        t1 = TranslationTarget()
+        t2 = TranslationTarget()
+        rc = RangedConstraint(
+            key="max_velocity_meters_per_sec", value=1.0,
+            start_ordinal=2, end_ordinal=2,
+        )
+        old_elements = [t1, t2]
+        e_new = EventTrigger()
+        path = _make_path(t1, e_new, t2, constraints=[rc])
+
+        remap_ranged_constraints(path, old_elements)
+
+        assert rc.start_ordinal == 2
+        assert rc.end_ordinal == 2
 
     def test_insert_non_domain_element_no_change(self):
         """Inserting a RotationTarget (not in translation domain) does not shift
@@ -500,19 +583,19 @@ class TestEdgeCases:
 
         assert len(path.ranged_constraints) == 0
 
-    def test_event_trigger_in_rotation_domain(self):
-        """EventTrigger is in the rotation domain only."""
-        e1 = EventTrigger()
-        e2 = EventTrigger()
+    def test_event_trigger_does_not_shift_rotation_constraints(self):
+        """EventTrigger is not in either ranged constraint domain."""
+        r1 = RotationTarget()
+        w1 = Waypoint()
         rc = RangedConstraint(
             key="max_velocity_deg_per_sec", value=50.0,
             start_ordinal=1, end_ordinal=2,
         )
-        old_elements = [e1, e2]
+        old_elements = [r1, w1]
         e_new = EventTrigger()
-        path = _make_path(e_new, e1, e2, constraints=[rc])
+        path = _make_path(e_new, r1, w1, constraints=[rc])
 
         remap_ranged_constraints(path, old_elements)
 
-        assert rc.start_ordinal == 2
-        assert rc.end_ordinal == 3
+        assert rc.start_ordinal == 1
+        assert rc.end_ordinal == 2

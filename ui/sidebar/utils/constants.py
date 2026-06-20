@@ -165,6 +165,11 @@ TRANSLATION_CONSTRAINT_KEYS = frozenset({
     "max_acceleration_meters_per_sec2",
 })
 
+ROTATION_CONSTRAINT_KEYS = frozenset({
+    "max_velocity_deg_per_sec",
+    "max_acceleration_deg_per_sec2",
+})
+
 
 def _extract_unit(label: str) -> str:
     """Extract the unit suffix from a label like 'X (m)' -> ' m'.

@@ -8,30 +8,31 @@ from ui.sidebar.utils.ranged_constraint_ui import (
 )
 
 
-def test_rotation_domain_includes_event_triggers():
+def test_rotation_domain_excludes_event_triggers_and_translations():
     path = Path(
         path_elements=[
             TranslationTarget(),
             EventTrigger(),
             RotationTarget(),
             Waypoint(),
+            TranslationTarget(),
         ]
     )
 
     elements = get_constraint_domain_elements(path, "max_velocity_deg_per_sec")
 
     assert [type(element).__name__ for element in elements] == [
-        "EventTrigger",
         "RotationTarget",
         "Waypoint",
     ]
 
 
-def test_translation_domain_info_and_labels():
+def test_translation_domain_excludes_rotations_and_event_triggers():
     path = Path(
         path_elements=[
             TranslationTarget(),
             Waypoint(),
+            RotationTarget(),
             TranslationTarget(),
             EventTrigger(),
         ]

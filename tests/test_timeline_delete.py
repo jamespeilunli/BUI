@@ -140,7 +140,7 @@ def test_timeline_rotation_delete_remaps_rotation_ranged_constraints(qt_app):
                         key="max_velocity_deg_per_sec",
                         value=90.0,
                         start_ordinal=1,
-                        end_ordinal=3,
+                        end_ordinal=2,
                     ),
                 ],
             ),
@@ -151,7 +151,7 @@ def test_timeline_rotation_delete_remaps_rotation_ranged_constraints(qt_app):
 
         assert len(window.path.ranged_constraints) == 1
         constraint = window.path.ranged_constraints[0]
-        assert (constraint.start_ordinal, constraint.end_ordinal) == (1, 2)
+        assert (constraint.start_ordinal, constraint.end_ordinal) == (1, 1)
     finally:
         window.close()
 

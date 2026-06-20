@@ -13,8 +13,10 @@ from models.path_model import (
 )
 from ui.timeline.placeholder import (
     HEADER_WIDTH,
+    ROTATION_CONSTRAINT_ROW_TITLE,
     TRACK_PADDING_X,
     TimelineDock,
+    TRANSLATION_CONSTRAINT_ROW_TITLE,
     _assign_span_lanes,
     _build_projection,
     _closest_time_for_point,
@@ -22,6 +24,10 @@ from ui.timeline.placeholder import (
     _nice_ruler_step,
     TimelineSpan,
 )
+
+
+def _constraint_row_for_key(projection, key: str):
+    return next(row for row in projection.rows if str(key) in row.constraint_positions_by_key)
 
 
 def _axis_path() -> Path:
@@ -53,7 +59,7 @@ def test_projection_uses_configured_fallback_velocity_for_time_axis():
 
     structure = next(row for row in projection.rows if row.title == "Structure")
     triggers = next(row for row in projection.rows if row.title == "Triggers")
-    constraints = next(row for row in projection.rows if row.title == "Constraints")
+    constraints = _constraint_row_for_key(projection, "max_velocity_meters_per_sec")
 
     assert projection.axis_label == "Estimated Time"
     assert projection.axis_unit == "s"
@@ -82,7 +88,7 @@ def test_projection_uses_simulation_time_when_available(monkeypatch):
 
     projection = _build_projection(_axis_path(), {}, use_sim_time=True)
     structure = next(row for row in projection.rows if row.title == "Structure")
-    constraints = next(row for row in projection.rows if row.title == "Constraints")
+    constraints = _constraint_row_for_key(projection, "max_velocity_meters_per_sec")
 
     assert math.isclose(projection.total_s_m, 10.0)
     assert math.isclose(structure.markers[1].s_m, 2.0)
@@ -162,7 +168,11 @@ def test_timeline_canvas_geometry_keeps_header_and_track_alignment(qt_app, mixed
         assert len(layout) == len(rows)
         assert all(height > 0 for _top, height in layout)
 
-        constraints = next(row for row in rows if row.title == "Constraints")
+        assert [row.title for row in rows[-2:]] == [
+            TRANSLATION_CONSTRAINT_ROW_TITLE,
+            ROTATION_CONSTRAINT_ROW_TITLE,
+        ]
+        constraints = _constraint_row_for_key(dock._projection, "max_velocity_meters_per_sec")
         row_top, row_height = next(
             row_layout
             for row, row_layout in zip(rows, layout)
@@ -177,5 +187,19 @@ def test_timeline_canvas_geometry_keeps_header_and_track_alignment(qt_app, mixed
         assert lane_count == constraints.lane_count
         assert lane_height > 0.0
         assert track_rect.top() <= lanes_top <= track_rect.bottom()
+    finally:
+        dock.close()
+
+
+def test_timeline_rail_paints_domain_specific_constraint_add_state(qt_app, mixed_path):
+    dock = TimelineDock(mixed_path)
+    try:
+        dock.resize(720, 260)
+        dock._sync_canvas_size()
+        dock._apply_constraint_add_armed(True, "max_velocity_deg_per_sec")
+
+        pixmap = dock._rail_canvas.grab()
+
+        assert not pixmap.isNull()
     finally:
         dock.close()

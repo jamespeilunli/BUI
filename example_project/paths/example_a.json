@@ -1,10 +1,16 @@
 {
   "path_elements": [
     {
-      "type": "translation",
-      "x_meters": 5.072950339658,
-      "y_meters": 4.163116654954323,
-      "intermediate_handoff_radius_meters": 0.25
+      "type": "waypoint",
+      "translation_target": {
+        "x_meters": 5.072950339658,
+        "y_meters": 4.163116654954323,
+        "intermediate_handoff_radius_meters": 0.25
+      },
+      "rotation_target": {
+        "rotation_radians": 0.0,
+        "profiled_rotation": true
+      }
     },
     {
       "type": "event_trigger",
@@ -25,9 +31,39 @@
     },
     {
       "type": "translation",
-      "x_meters": 7.348083912152945,
-      "y_meters": 7.207034896897282,
+      "x_meters": 7.157703196917246,
+      "y_meters": 5.831178993912975,
       "intermediate_handoff_radius_meters": 0.25
+    },
+    {
+      "type": "waypoint",
+      "translation_target": {
+        "x_meters": 7.348083912152945,
+        "y_meters": 7.207034896897282,
+        "intermediate_handoff_radius_meters": 0.25
+      },
+      "rotation_target": {
+        "rotation_radians": 0.0,
+        "profiled_rotation": true
+      }
+    },
+    {
+      "type": "waypoint",
+      "translation_target": {
+        "x_meters": 7.888704580995624,
+        "y_meters": 5.852861290686986,
+        "intermediate_handoff_radius_meters": 0.25
+      },
+      "rotation_target": {
+        "rotation_radians": 0.0,
+        "profiled_rotation": true
+      }
+    },
+    {
+      "type": "rotation",
+      "rotation_radians": 0.0,
+      "t_ratio": 0.3500960795551698,
+      "profiled_rotation": true
     },
     {
       "type": "translation",
@@ -56,16 +92,16 @@
   ],
   "constraints": {
     "default_max_velocity_meters_per_sec": 2.2,
-    "max_acceleration_meters_per_sec2": [
-      {
-        "value": 1.0,
-        "start_ordinal": 1,
-        "end_ordinal": 3
-      }
-    ],
     "max_velocity_meters_per_sec": [
       {
-        "value": 2.5,
+        "value": 0.5,
+        "start_ordinal": 4,
+        "end_ordinal": 7
+      }
+    ],
+    "max_velocity_deg_per_sec": [
+      {
+        "value": 720.0,
         "start_ordinal": 3,
         "end_ordinal": 4
       }

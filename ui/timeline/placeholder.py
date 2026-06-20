@@ -32,7 +32,13 @@ from models.path_model import (
 from models.simulation import simulate_path
 from ui.canvas.constants import SIMULATION_UPDATE_INTERVAL_MS
 from ui.qt_compat import Qt, QSizePolicy
-from ui.sidebar.utils import RANGED_CONSTRAINT_KEYS, SPINNER_METADATA, SPINNER_UNITS
+from ui.sidebar.utils import (
+    RANGED_CONSTRAINT_KEYS,
+    ROTATION_CONSTRAINT_KEYS,
+    SPINNER_METADATA,
+    SPINNER_UNITS,
+    TRANSLATION_CONSTRAINT_KEYS,
+)
 from ui.sidebar.utils.ranged_constraint_ui import get_constraint_domain_elements
 
 
@@ -68,6 +74,8 @@ STRUCTURE_ADD_LABELS = {
     "waypoint": "Waypoint",
     "rotation": "Rotation",
 }
+TRANSLATION_CONSTRAINT_ROW_TITLE = "Translation Constraints"
+ROTATION_CONSTRAINT_ROW_TITLE = "Rotation Constraints"
 
 
 @dataclass
@@ -181,6 +189,16 @@ def _constraint_row_keys(row: TimelineRow) -> list[str]:
     return []
 
 
+def _is_constraint_row(row: TimelineRow | None) -> bool:
+    return bool(row is not None and _constraint_row_keys(row))
+
+
+def _constraint_domain_label_for_key(key: str) -> str:
+    if str(key) in TRANSLATION_CONSTRAINT_KEYS:
+        return "translation"
+    return "rotation"
+
+
 def _distribute_integer_heights(values: list[float], target_total: int) -> list[int]:
     if not values:
         return []
@@ -288,18 +306,20 @@ class _TimelineCanvasBase(QWidget):
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        self._paint_background(painter)
+        try:
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            self._paint_background(painter)
 
-        if not self._projection.rows:
+            if not self._projection.rows:
+                return
+
+            self._draw_ruler(painter)
+            for index, (row, (row_top, row_h)) in enumerate(
+                zip(self._projection.rows, self._row_layout())
+            ):
+                self._draw_row(painter, row, row_top, row_h, index)
+        finally:
             painter.end()
-            return
-
-        self._draw_ruler(painter)
-        for index, (row, (row_top, row_h)) in enumerate(zip(self._projection.rows, self._row_layout())):
-            self._draw_row(painter, row, row_top, row_h, index)
-
-        painter.end()
 
     def _paint_background(self, painter: QPainter) -> None:
         painter.fillRect(self.rect(), QColor("#141414"))
@@ -316,7 +336,7 @@ class _TimelineCanvasBase(QWidget):
 class _TimelineRailCanvas(_TimelineCanvasBase):
     structureAddClicked = Signal()
     triggerAddClicked = Signal()
-    constraintAddClicked = Signal()
+    constraintAddClicked = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -324,6 +344,7 @@ class _TimelineRailCanvas(_TimelineCanvasBase):
         self._structure_add_armed = False
         self._trigger_add_armed = False
         self._constraint_add_armed = False
+        self._constraint_create_key = str(RANGED_CONSTRAINT_KEYS[0])
 
     def set_structure_add_armed(self, armed: bool) -> None:
         self._structure_add_armed = bool(armed)
@@ -335,6 +356,11 @@ class _TimelineRailCanvas(_TimelineCanvasBase):
 
     def set_constraint_add_armed(self, armed: bool) -> None:
         self._constraint_add_armed = bool(armed)
+        self.update()
+
+    def set_constraint_create_key(self, key: str) -> None:
+        if key in RANGED_CONSTRAINT_KEYS:
+            self._constraint_create_key = str(key)
         self.update()
 
     def _draw_ruler(self, painter: QPainter) -> None:
@@ -362,8 +388,12 @@ class _TimelineRailCanvas(_TimelineCanvasBase):
             self._draw_add_button(painter, y, row_height, self._structure_add_armed)
         elif row.title == "Triggers":
             self._draw_add_button(painter, y, row_height, self._trigger_add_armed)
-        elif row.title == "Constraints":
-            self._draw_add_button(painter, y, row_height, self._constraint_add_armed)
+        elif _is_constraint_row(row):
+            armed = bool(
+                self._constraint_add_armed
+                and self._constraint_create_key in _constraint_row_keys(row)
+            )
+            self._draw_add_button(painter, y, row_height, armed)
 
     def _draw_add_button(self, painter: QPainter, y: int, row_height: int, armed: bool) -> None:
         rect = self._add_button_rect(y, row_height)
@@ -391,7 +421,7 @@ class _TimelineRailCanvas(_TimelineCanvasBase):
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() == Qt.LeftButton:
             for row, (row_top, row_h) in zip(self._projection.rows, self._row_layout()):
-                if row.title not in {"Structure", "Triggers", "Constraints"}:
+                if row.title not in {"Structure", "Triggers"} and not _is_constraint_row(row):
                     continue
                 if self._add_button_rect(row_top, row_h).contains(event.position()):
                     if row.title == "Structure":
@@ -399,7 +429,9 @@ class _TimelineRailCanvas(_TimelineCanvasBase):
                     elif row.title == "Triggers":
                         self.triggerAddClicked.emit()
                     else:
-                        self.constraintAddClicked.emit()
+                        keys = _constraint_row_keys(row)
+                        domain = _constraint_domain_label_for_key(keys[0]) if keys else ""
+                        self.constraintAddClicked.emit(domain)
                     event.accept()
                     return
         super().mousePressEvent(event)
@@ -567,7 +599,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         return max(1, int(lane) + 1)
 
     def _active_constraint_preview_lane(self, row: TimelineRow) -> int | None:
-        if row.title != "Constraints":
+        if not _is_constraint_row(row):
             return None
         if (
             self._creating_constraint_key
@@ -699,7 +731,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
 
     def _has_constraint_create_preview(self, row: TimelineRow) -> bool:
         return bool(
-            row.title == "Constraints"
+            _is_constraint_row(row)
             and self._creating_constraint_key
             and self._creating_constraint_preview is not None
             and self._creating_constraint_key in row.constraint_positions_by_key
@@ -1090,16 +1122,20 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             start_ordinal, end_ordinal = end_ordinal, start_ordinal
         return True
 
-    def _constraint_row(self) -> TimelineRow | None:
+    def _constraint_row_for_key(self, key: str | None) -> TimelineRow | None:
+        if not key:
+            return None
         for row in self._projection.rows:
-            if row.title == "Constraints":
+            if str(key) in _constraint_row_keys(row):
                 return row
         return None
 
     def _update_constraint_drag_preview(self, x: float) -> None:
         span = self._pressed_constraint_span
-        row = self._constraint_row()
-        if span is None or row is None or not span.constraint_key:
+        if span is None or not span.constraint_key:
+            return
+        row = self._constraint_row_for_key(str(span.constraint_key))
+        if row is None:
             return
         origin = self._pressed_constraint_origin
         if origin is None:
@@ -1231,7 +1267,8 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         if (
             self._constraint_add_armed
             and pressed_row is not None
-            and pressed_row.title == "Constraints"
+            and _is_constraint_row(pressed_row)
+            and self._constraint_create_key in _constraint_row_keys(pressed_row)
             and self._pressed_hit is None
         ):
             positions = pressed_row.constraint_positions_by_key.get(self._constraint_create_key, [])
@@ -1278,7 +1315,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                         float(event.position().x()),
                         float(event.position().y()),
                     )
-                    row = self._constraint_row()
+                    row = self._constraint_row_for_key(str(span.constraint_key))
                     if row is not None and span.constraint_key:
                         positions = row.constraint_positions_by_key.get(
                             str(span.constraint_key),
@@ -1344,7 +1381,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             event.accept()
             return
         if self._constraint_add_press_consumed:
-            row = self._constraint_row()
+            row = self._constraint_row_for_key(self._creating_constraint_key)
             if (
                 row is not None
                 and self._creating_constraint_key
@@ -1735,7 +1772,11 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                     self.unsetCursor()
                 return
             row = self._row_at_y(float(y)) if y is not None else None
-            if row is not None and row.title == "Constraints":
+            if (
+                row is not None
+                and _is_constraint_row(row)
+                and self._constraint_create_key in _constraint_row_keys(row)
+            ):
                 self.setCursor(Qt.CrossCursor)
                 self.setToolTip(
                     f"Drag to create {_constraint_key_label(self._constraint_create_key)}"
@@ -2102,7 +2143,7 @@ class TimelineDock(QFrame):
         self._rail_canvas = _TimelineRailCanvas()
         self._rail_canvas.structureAddClicked.connect(self._show_structure_add_menu)
         self._rail_canvas.triggerAddClicked.connect(self._toggle_trigger_add_armed)
-        self._rail_canvas.constraintAddClicked.connect(self._toggle_constraint_add_armed)
+        self._rail_canvas.constraintAddClicked.connect(self._show_constraint_add_menu)
         self._rail_scroll.setWidget(self._rail_canvas)
         body_layout.addWidget(self._rail_scroll)
 
@@ -2478,8 +2519,40 @@ class TimelineDock(QFrame):
 
     def _show_structure_add_menu(self) -> None:
         menu = QMenu(self)
-        menu.setStyleSheet(
-            """
+        menu.setStyleSheet(self._timeline_menu_stylesheet())
+        for element_type in STRUCTURE_ADD_TYPES:
+            action = menu.addAction(STRUCTURE_ADD_LABELS[element_type])
+            action.triggered.connect(
+                lambda checked=False, item_type=element_type: self._apply_structure_add_armed(
+                    True,
+                    item_type,
+                )
+        )
+        menu.exec(QCursor.pos())
+
+    def _show_constraint_add_menu(self, domain: str) -> None:
+        domain = str(domain)
+        if domain == "translation":
+            keys = [key for key in RANGED_CONSTRAINT_KEYS if key in TRANSLATION_CONSTRAINT_KEYS]
+        elif domain == "rotation":
+            keys = [key for key in RANGED_CONSTRAINT_KEYS if key in ROTATION_CONSTRAINT_KEYS]
+        else:
+            return
+
+        menu = QMenu(self)
+        menu.setStyleSheet(self._timeline_menu_stylesheet())
+        for key in keys:
+            action = menu.addAction(_constraint_key_label(str(key)))
+            action.triggered.connect(
+                lambda checked=False, item_key=str(key): self._apply_constraint_add_armed(
+                    True,
+                    item_key,
+                )
+            )
+        menu.exec(QCursor.pos())
+
+    def _timeline_menu_stylesheet(self) -> str:
+        return """
             QMenu {
                 background: #202326;
                 color: #eef2f6;
@@ -2493,16 +2566,6 @@ class TimelineDock(QFrame):
                 background: #304155;
             }
             """
-        )
-        for element_type in STRUCTURE_ADD_TYPES:
-            action = menu.addAction(STRUCTURE_ADD_LABELS[element_type])
-            action.triggered.connect(
-                lambda checked=False, item_type=element_type: self._apply_structure_add_armed(
-                    True,
-                    item_type,
-                )
-            )
-        menu.exec(QCursor.pos())
 
     def _clear_add_modes(self) -> None:
         self._apply_structure_add_armed(False)
@@ -2545,14 +2608,15 @@ class TimelineDock(QFrame):
         if key not in RANGED_CONSTRAINT_KEYS:
             return
         self._constraint_create_key = str(key)
+        self._rail_canvas.set_constraint_create_key(str(key))
         self._track_canvas.set_constraint_create_key(str(key))
 
-    def _toggle_constraint_add_armed(self) -> None:
-        self._apply_constraint_add_armed(not self._constraint_add_armed)
-
-    def _apply_constraint_add_armed(self, armed: bool) -> None:
+    def _apply_constraint_add_armed(self, armed: bool, key: str | None = None) -> None:
         self._constraint_add_armed = bool(armed)
+        if key in RANGED_CONSTRAINT_KEYS:
+            self._constraint_create_key = str(key)
         self._rail_canvas.set_constraint_add_armed(self._constraint_add_armed)
+        self._rail_canvas.set_constraint_create_key(self._constraint_create_key)
         self._track_canvas.set_constraint_add_armed(self._constraint_add_armed)
         self._track_canvas.set_constraint_create_key(self._constraint_create_key)
         if self._constraint_add_armed:
@@ -2745,29 +2809,60 @@ def _build_projection(
         ),
     ]
 
-    constraint_spans = _build_combined_constraint_spans(
+    translation_constraint_keys = [
+        key for key in RANGED_CONSTRAINT_KEYS if key in TRANSLATION_CONSTRAINT_KEYS
+    ]
+    rotation_constraint_keys = [
+        key for key in RANGED_CONSTRAINT_KEYS if key in ROTATION_CONSTRAINT_KEYS
+    ]
+    translation_constraint_spans = _build_combined_constraint_spans(
         path,
-        list(RANGED_CONSTRAINT_KEYS),
+        translation_constraint_keys,
         path_elements,
         anchor_s_by_path_index,
     )
-    constraint_positions_by_key = {
+    rotation_constraint_spans = _build_combined_constraint_spans(
+        path,
+        rotation_constraint_keys,
+        path_elements,
+        anchor_s_by_path_index,
+    )
+    translation_constraint_positions_by_key = {
         key: _build_constraint_positions(path, key, path_elements, anchor_s_by_path_index)
-        for key in RANGED_CONSTRAINT_KEYS
+        for key in translation_constraint_keys
     }
-    constraint_display_ranges_by_key = {
-        key: _build_constraint_display_ranges(constraint_positions_by_key[key])
-        for key in RANGED_CONSTRAINT_KEYS
+    rotation_constraint_positions_by_key = {
+        key: _build_constraint_positions(path, key, path_elements, anchor_s_by_path_index)
+        for key in rotation_constraint_keys
+    }
+    translation_constraint_display_ranges_by_key = {
+        key: _build_constraint_display_ranges(translation_constraint_positions_by_key[key])
+        for key in translation_constraint_keys
+    }
+    rotation_constraint_display_ranges_by_key = {
+        key: _build_constraint_display_ranges(rotation_constraint_positions_by_key[key])
+        for key in rotation_constraint_keys
     }
     rows.append(
         TimelineRow(
-            title="Constraints",
-            empty_text="No ranges yet.",
-            spans=constraint_spans,
-            lane_count=_lane_count_for_spans(constraint_spans),
-            constraint_keys=list(RANGED_CONSTRAINT_KEYS),
-            constraint_positions_by_key=constraint_positions_by_key,
-            constraint_display_ranges_by_key=constraint_display_ranges_by_key,
+            title=TRANSLATION_CONSTRAINT_ROW_TITLE,
+            empty_text="No translation ranges yet.",
+            spans=translation_constraint_spans,
+            lane_count=_lane_count_for_spans(translation_constraint_spans),
+            constraint_keys=translation_constraint_keys,
+            constraint_positions_by_key=translation_constraint_positions_by_key,
+            constraint_display_ranges_by_key=translation_constraint_display_ranges_by_key,
+        )
+    )
+    rows.append(
+        TimelineRow(
+            title=ROTATION_CONSTRAINT_ROW_TITLE,
+            empty_text="No rotation ranges yet.",
+            spans=rotation_constraint_spans,
+            lane_count=_lane_count_for_spans(rotation_constraint_spans),
+            constraint_keys=rotation_constraint_keys,
+            constraint_positions_by_key=rotation_constraint_positions_by_key,
+            constraint_display_ranges_by_key=rotation_constraint_display_ranges_by_key,
         )
     )
 

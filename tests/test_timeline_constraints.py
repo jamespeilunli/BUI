@@ -13,7 +13,9 @@ from models.path_model import (
     Waypoint,
 )
 from ui.timeline.placeholder import (
+    ROTATION_CONSTRAINT_ROW_TITLE,
     TimelineDock,
+    TRANSLATION_CONSTRAINT_ROW_TITLE,
     _build_projection,
     _constraint_creation_range_for_s,
     _constraint_move_range_for_display_start,
@@ -22,6 +24,10 @@ from ui.timeline.placeholder import (
     resolve_structure_placement_for_time,
 )
 from ui.qt_compat import Qt
+
+
+def _constraint_row_for_key(projection, key: str):
+    return next(row for row in projection.rows if str(key) in row.constraint_positions_by_key)
 
 
 def _path_with_constraints() -> Path:
@@ -48,13 +54,20 @@ def _path_with_constraints() -> Path:
     )
 
 
-def test_constraints_remain_on_single_combined_row():
+def test_constraints_are_split_by_domain_rows():
     projection = _build_projection(_path_with_constraints(), {}, use_sim_time=False)
 
-    constraint_rows = [row for row in projection.rows if row.title == "Constraints"]
-    assert len(constraint_rows) == 1
+    constraint_rows = [
+        row
+        for row in projection.rows
+        if row.title in {TRANSLATION_CONSTRAINT_ROW_TITLE, ROTATION_CONSTRAINT_ROW_TITLE}
+    ]
+    assert [row.title for row in constraint_rows] == [
+        TRANSLATION_CONSTRAINT_ROW_TITLE,
+        ROTATION_CONSTRAINT_ROW_TITLE,
+    ]
 
-    row = constraint_rows[0]
+    row = next(row for row in constraint_rows if row.title == TRANSLATION_CONSTRAINT_ROW_TITLE)
     assert len(row.spans) == 2
     assert {span.constraint_key for span in row.spans} == {
         "max_velocity_meters_per_sec",
@@ -71,9 +84,72 @@ def test_constraints_remain_on_single_combined_row():
     )
 
 
+def test_rotation_constraints_appear_only_on_rotation_constraint_row():
+    key = "max_velocity_deg_per_sec"
+    path = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            EventTrigger(t_ratio=0.2, lib_key="event"),
+            RotationTarget(rotation_radians=0.5, t_ratio=0.5),
+            Waypoint(translation_target=TranslationTarget(4.0, 0.0)),
+            TranslationTarget(8.0, 0.0),
+        ],
+        ranged_constraints=[
+            RangedConstraint(key=key, value=90.0, start_ordinal=1, end_ordinal=2),
+        ],
+    )
+
+    projection = _build_projection(path, {}, use_sim_time=False)
+    translation_row = next(row for row in projection.rows if row.title == TRANSLATION_CONSTRAINT_ROW_TITLE)
+    rotation_row = next(row for row in projection.rows if row.title == ROTATION_CONSTRAINT_ROW_TITLE)
+
+    assert key not in translation_row.constraint_positions_by_key
+    assert [span.constraint_key for span in rotation_row.spans] == [key]
+    assert len(rotation_row.constraint_positions_by_key[key]) == 2
+
+
+def test_timeline_constraint_domains_ignore_unrelated_structure_elements():
+    base = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            RotationTarget(rotation_radians=0.5, t_ratio=0.5),
+            Waypoint(translation_target=TranslationTarget(4.0, 0.0)),
+            TranslationTarget(8.0, 0.0),
+        ],
+    )
+    with_events = Path(
+        path_elements=[
+            TranslationTarget(0.0, 0.0),
+            EventTrigger(t_ratio=0.2, lib_key="event-a"),
+            RotationTarget(rotation_radians=0.5, t_ratio=0.5),
+            EventTrigger(t_ratio=0.8, lib_key="event-b"),
+            Waypoint(translation_target=TranslationTarget(4.0, 0.0)),
+            TranslationTarget(8.0, 0.0),
+        ],
+    )
+
+    base_projection = _build_projection(base, {}, use_sim_time=False)
+    event_projection = _build_projection(with_events, {}, use_sim_time=False)
+
+    assert _constraint_row_for_key(
+        base_projection,
+        "max_velocity_deg_per_sec",
+    ).constraint_positions_by_key["max_velocity_deg_per_sec"] == _constraint_row_for_key(
+        event_projection,
+        "max_velocity_deg_per_sec",
+    ).constraint_positions_by_key["max_velocity_deg_per_sec"]
+    assert _constraint_row_for_key(
+        base_projection,
+        "max_velocity_meters_per_sec",
+    ).constraint_positions_by_key["max_velocity_meters_per_sec"] == _constraint_row_for_key(
+        event_projection,
+        "max_velocity_meters_per_sec",
+    ).constraint_positions_by_key["max_velocity_meters_per_sec"]
+
+
 def test_constraint_span_edges_align_to_domain_positions():
     projection = _build_projection(_path_with_constraints(), {}, use_sim_time=False)
-    row = next(row for row in projection.rows if row.title == "Constraints")
+    row = _constraint_row_for_key(projection, "max_acceleration_meters_per_sec2")
     span = next(span for span in row.spans if span.constraint_key == "max_acceleration_meters_per_sec2")
     positions = row.constraint_positions_by_key["max_acceleration_meters_per_sec2"]
 
@@ -123,7 +199,7 @@ def test_constraint_body_drag_uses_press_offset_to_avoid_large_jump(qt_app):
     )
     dock = TimelineDock(path)
     canvas = dock._track_canvas
-    row = next(row for row in dock._projection.rows if row.title == "Constraints")
+    row = _constraint_row_for_key(dock._projection, key)
     span = row.spans[0]
     display_start, display_end = span.start_s_m, span.end_s_m
     press_s = display_end - 0.1
@@ -161,7 +237,7 @@ def test_constraint_creation_uses_visual_drag_interval():
 
 def test_same_key_and_other_key_overlaps_are_allowed(qt_app):
     dock = TimelineDock(_path_with_constraints())
-    row = next(row for row in dock._projection.rows if row.title == "Constraints")
+    row = _constraint_row_for_key(dock._projection, "max_velocity_meters_per_sec")
 
     assert dock._track_canvas._constraint_range_available(
         row,
@@ -200,7 +276,7 @@ def test_overlapping_same_key_constraints_stack_into_lanes():
     )
 
     projection = _build_projection(path, {}, use_sim_time=False)
-    row = next(row for row in projection.rows if row.title == "Constraints")
+    row = _constraint_row_for_key(projection, key)
 
     assert row.lane_count == 3
     assert sorted(span.lane for span in row.spans) == [0, 1, 2]
@@ -210,7 +286,7 @@ def test_constraint_hover_feedback_uses_move_and_resize_cursors(qt_app):
     dock = TimelineDock(_path_with_constraints())
     canvas = dock._track_canvas
     canvas.resize(520, 220)
-    row = next(row for row in dock._projection.rows if row.title == "Constraints")
+    row = _constraint_row_for_key(dock._projection, "max_velocity_meters_per_sec")
     row_top, row_h = next(
         layout
         for projection_row, layout in zip(dock._projection.rows, canvas._row_layout())
@@ -245,7 +321,7 @@ def test_overlapping_constraint_drag_preview_remains_valid(qt_app):
     )
     dock = TimelineDock(path)
     canvas = dock._track_canvas
-    row = next(row for row in dock._projection.rows if row.title == "Constraints")
+    row = _constraint_row_for_key(dock._projection, key)
     span = next(span for span in row.spans if span.constraint_key == key and span.start_ordinal == 1)
     positions = row.constraint_positions_by_key[key]
 
@@ -276,7 +352,7 @@ def test_constraint_drag_preserves_original_lane_until_release(qt_app):
     )
     dock = TimelineDock(path)
     canvas = dock._track_canvas
-    row = next(row for row in dock._projection.rows if row.title == "Constraints")
+    row = _constraint_row_for_key(dock._projection, key)
     span = next(span for span in row.spans if span.constraint_index == 1)
     original_lane = span.lane
 

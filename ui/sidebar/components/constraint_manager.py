@@ -975,7 +975,6 @@ class ConstraintManager(QObject):
             TranslationTarget,
             Waypoint,
             RotationTarget,
-            EventTrigger,
         )
 
         element = self.path.path_elements[global_index]
@@ -985,7 +984,7 @@ class ConstraintManager(QObject):
             if key in TRANSLATION_CONSTRAINT_KEYS:
                 domain_types = (TranslationTarget, Waypoint)
             else:
-                domain_types = (Waypoint, RotationTarget, EventTrigger)
+                domain_types = (Waypoint, RotationTarget)
 
             if not isinstance(element, domain_types):
                 continue

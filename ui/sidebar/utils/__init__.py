@@ -9,6 +9,7 @@ from .constants import (
     NON_RANGED_CONSTRAINT_KEYS,
     RANGED_CONSTRAINT_KEYS,
     TRANSLATION_CONSTRAINT_KEYS,
+    ROTATION_CONSTRAINT_KEYS,
     constraint_default_value,
 )
 from .element_helpers import (
@@ -36,6 +37,7 @@ __all__ = [
     "NON_RANGED_CONSTRAINT_KEYS",
     "RANGED_CONSTRAINT_KEYS",
     "TRANSLATION_CONSTRAINT_KEYS",
+    "ROTATION_CONSTRAINT_KEYS",
     "constraint_default_value",
     "clamp_from_metadata",
     "get_element_position",
