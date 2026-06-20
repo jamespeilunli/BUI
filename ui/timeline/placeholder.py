@@ -2203,14 +2203,19 @@ class TimelineDock(QFrame):
             self._track_scroll.viewport(),
             self._rail_scroll.viewport(),
         }:
-            delta = event.angleDelta()
-            delta_y = int(delta.y()) if delta else 0
-            if delta_y == 0:
-                pixel_delta = event.pixelDelta()
-                if pixel_delta:
-                    delta_y = int(pixel_delta.y())
-            if delta_y != 0:
-                self._zoom_from_wheel(delta_y, event.position().x(), watched)
+            delta_x, delta_y = self._wheel_delta_components(event)
+            abs_x = abs(delta_x)
+            abs_y = abs(delta_y)
+            if abs_x > abs_y:
+                if watched is self._track_scroll.viewport():
+                    self._pan_horizontally_from_wheel(delta_x)
+                event.accept()
+                return True
+            if abs_y > abs_x:
+                self._zoom_from_wheel(int(round(delta_y)), event.position().x(), watched)
+                event.accept()
+                return True
+            if abs_x > 1e-6 or abs_y > 1e-6:
                 event.accept()
                 return True
         if event.type() == QEvent.Resize and watched in {
@@ -2246,6 +2251,25 @@ class TimelineDock(QFrame):
 
     def _adjust_zoom(self, delta: int) -> None:
         self._zoom_slider.setValue(self._zoom_slider.value() + int(delta))
+
+    def _wheel_delta_components(self, event) -> tuple[float, float]:
+        pixel_delta = event.pixelDelta()
+        pixel_x = float(pixel_delta.x()) if pixel_delta else 0.0
+        pixel_y = float(pixel_delta.y()) if pixel_delta else 0.0
+        if abs(pixel_x) > 1e-6 or abs(pixel_y) > 1e-6:
+            return pixel_x, pixel_y
+
+        angle_delta = event.angleDelta()
+        angle_x = float(angle_delta.x()) if angle_delta else 0.0
+        angle_y = float(angle_delta.y()) if angle_delta else 0.0
+        return angle_x, angle_y
+
+    def _pan_horizontally_from_wheel(self, delta_x: float) -> None:
+        hbar = self._track_scroll.horizontalScrollBar()
+        scroll_px = int(round(delta_x))
+        if scroll_px == 0 and abs(delta_x) > 1e-6:
+            scroll_px = 1 if delta_x > 0.0 else -1
+        hbar.setValue(hbar.value() - scroll_px)
 
     def _zoom_from_wheel(self, delta_y: int, viewport_x: float, watched: QWidget) -> None:
         if delta_y == 0:
