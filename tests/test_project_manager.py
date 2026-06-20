@@ -53,6 +53,23 @@ def test_project_config_migrates_legacy_protrusions():
     assert structured["gui"]["protrusions"]["distance_meters"] == 0.18
 
 
+def test_project_manager_uses_bui_settings_namespace(monkeypatch):
+    calls: list[tuple[str, str]] = []
+
+    class RecordingSettings(DummySettings):
+        def __init__(self, organization: str, application: str):
+            super().__init__()
+            calls.append((organization, application))
+
+    monkeypatch.setattr("utils.project_manager.QSettings", RecordingSettings)
+
+    ProjectManager()
+
+    assert ProjectManager.SETTINGS_ORG == "BUI"
+    assert ProjectManager.SETTINGS_APP == "BUI"
+    assert calls == [("BUI", "BUI")]
+
+
 def test_project_manager_migrates_legacy_config_file(tmp_path: Path):
     pm = ProjectManager()
     pm.settings = DummySettings()

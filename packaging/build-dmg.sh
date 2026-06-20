@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# BLine macOS Build Script
+# BUI macOS Build Script
 # Creates a .app bundle with PyInstaller and packages it as a fancy .dmg
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,7 +10,7 @@ BUILD_DIR="${SCRIPT_DIR}/build"
 DIST_DIR="${SCRIPT_DIR}/dist"
 
 echo "========================================"
-echo "Building BLine for macOS"
+echo "Building BUI for macOS"
 echo "========================================"
 echo ""
 
@@ -38,8 +38,8 @@ mkdir -p "$BUILD_DIR"
 # Generate .icns from rebel_logo.png
 echo "Generating app icon..."
 LOGO_SRC="${PROJECT_DIR}/assets/rebel_logo.png"
-ICONSET_DIR="${BUILD_DIR}/BLine.iconset"
-ICNS_PATH="${BUILD_DIR}/BLine.icns"
+ICONSET_DIR="${BUILD_DIR}/BUI.iconset"
+ICNS_PATH="${BUILD_DIR}/BUI.icns"
 mkdir -p "$ICONSET_DIR"
 
 for size in 16 32 128 256 512; do
@@ -69,7 +69,7 @@ pyinstaller --clean --noconfirm \
 
 deactivate
 
-APP_PATH="${DIST_DIR}/BLine.app"
+APP_PATH="${DIST_DIR}/BUI.app"
 if [ ! -d "$APP_PATH" ]; then
     echo "Error: PyInstaller build failed — ${APP_PATH} not found."
     exit 1
@@ -77,7 +77,7 @@ fi
 
 # Create DMG 
 echo "Creating DMG..."
-OUTPUT="${PROJECT_DIR}/BLine-${VERSION}-macOS-${ARCH}.dmg"
+OUTPUT="${PROJECT_DIR}/BUI-${VERSION}-macOS-${ARCH}.dmg"
 STAGING_DIR="${BUILD_DIR}/dmg-staging"
 
 rm -f "$OUTPUT"
@@ -85,13 +85,13 @@ mkdir -p "$STAGING_DIR"
 cp -r "$APP_PATH" "$STAGING_DIR/"
 
 create-dmg \
-    --volname "BLine ${VERSION}" \
+    --volname "BUI ${VERSION}" \
     --volicon "$ICNS_PATH" \
     --window-pos 200 150 \
     --window-size 660 400 \
     --icon-size 128 \
-    --icon "BLine.app" 180 185 \
-    --hide-extension "BLine.app" \
+    --icon "BUI.app" 180 185 \
+    --hide-extension "BUI.app" \
     --app-drop-link 480 185 \
     --no-internet-enable \
     "$OUTPUT" \
@@ -102,4 +102,3 @@ echo "========================================"
 echo "Build complete!"
 echo "DMG created: $OUTPUT"
 echo "========================================"
-

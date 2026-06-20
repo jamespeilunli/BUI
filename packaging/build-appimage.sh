@@ -1,16 +1,16 @@
 #!/bin/bash
 set -e
 
-# BLine AppImage Build Script
-# This script creates a portable AppImage for BLine
+# BUI AppImage Build Script
+# This script creates a portable AppImage for BUI
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="${SCRIPT_DIR}/build"
-APPDIR="${BUILD_DIR}/BLine.AppDir"
+APPDIR="${BUILD_DIR}/BUI.AppDir"
 
 echo "========================================"
-echo "Building BLine AppImage"
+echo "Building BUI AppImage"
 echo "========================================"
 echo ""
 
@@ -37,30 +37,30 @@ cp -r "${BUILD_DIR}/venv/"* "${APPDIR}/usr/"
 
 # Copy application files
 echo "Copying application files..."
-mkdir -p "${APPDIR}/usr/share/bline"
-cp -r "${PROJECT_DIR}/models" "${APPDIR}/usr/share/bline/"
-cp -r "${PROJECT_DIR}/ui" "${APPDIR}/usr/share/bline/"
-cp -r "${PROJECT_DIR}/utils" "${APPDIR}/usr/share/bline/"
-cp "${PROJECT_DIR}/main.py" "${APPDIR}/usr/share/bline/"
-cp "${PROJECT_DIR}/assets_rc.py" "${APPDIR}/usr/share/bline/"
+mkdir -p "${APPDIR}/usr/share/bui"
+cp -r "${PROJECT_DIR}/models" "${APPDIR}/usr/share/bui/"
+cp -r "${PROJECT_DIR}/ui" "${APPDIR}/usr/share/bui/"
+cp -r "${PROJECT_DIR}/utils" "${APPDIR}/usr/share/bui/"
+cp "${PROJECT_DIR}/main.py" "${APPDIR}/usr/share/bui/"
+cp "${PROJECT_DIR}/assets_rc.py" "${APPDIR}/usr/share/bui/"
 
 # Copy assets
 echo "Copying assets..."
-cp -r "${PROJECT_DIR}/assets" "${APPDIR}/usr/share/bline/"
+cp -r "${PROJECT_DIR}/assets" "${APPDIR}/usr/share/bui/"
 
 # Create a shell wrapper that launches the app using the bundled Python
-cat > "${APPDIR}/usr/bin/bline" << 'EOF'
+cat > "${APPDIR}/usr/bin/bui" << 'EOF'
 #!/bin/bash
 SELF=$(readlink -f "$0")
 HERE=${SELF%/*}
-APP_DIR="${HERE}/../share/bline"
+APP_DIR="${HERE}/../share/bui"
 
 # Add app dir to PYTHONPATH (AppRun already added site-packages)
 export PYTHONPATH="${APP_DIR}:${PYTHONPATH}"
 
 exec python3 "${APP_DIR}/main.py" "$@"
 EOF
-chmod +x "${APPDIR}/usr/bin/bline"
+chmod +x "${APPDIR}/usr/bin/bui"
 
 # Copy AppRun script
 echo "Setting up AppRun..."
@@ -85,7 +85,7 @@ unset PYTHONHOME
 export PYTHONDONTWRITEBYTECODE=1
 
 # Launch the application
-exec "${HERE}/usr/bin/bline" "$@"
+exec "${HERE}/usr/bin/bui" "$@"
 APPRUN
 chmod +x "${APPDIR}/AppRun"
 
@@ -95,7 +95,7 @@ cp "${SCRIPT_DIR}/bline.desktop" "${APPDIR}/"
 
 # Copy icon
 echo "Installing icon..."
-cp "${PROJECT_DIR}/assets/rebel_logo.png" "${APPDIR}/bline.png"
+cp "${PROJECT_DIR}/assets/rebel_logo.png" "${APPDIR}/bui.png"
 
 # Download appimagetool if not present
 APPIMAGETOOL="${BUILD_DIR}/appimagetool-x86_64.AppImage"
@@ -108,7 +108,7 @@ fi
 
 # Build the AppImage
 echo "Building AppImage..."
-OUTPUT="${PROJECT_DIR}/BLine-x86_64.AppImage"
+OUTPUT="${PROJECT_DIR}/BUI-x86_64.AppImage"
 ARCH=x86_64 "$APPIMAGETOOL" "$APPDIR" "$OUTPUT"
 
 echo ""
@@ -117,4 +117,4 @@ echo "Build complete!"
 echo "AppImage created: $OUTPUT"
 echo "========================================"
 echo ""
-echo "You can now run: ./BLine-x86_64.AppImage"
+echo "You can now run: ./BUI-x86_64.AppImage"

@@ -1,9 +1,9 @@
 @echo off
-REM BLine Windows Build Script (Batch)
+REM BUI Windows Build Script (Batch)
 REM This is a simple wrapper that calls the PowerShell script
 
 echo ========================================
-echo Building BLine for Windows
+echo Building BUI for Windows
 echo ========================================
 echo.
 

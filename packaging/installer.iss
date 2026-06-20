@@ -1,18 +1,18 @@
-; BLine Inno Setup Installer Script
-; Creates a professional Windows installer for BLine
+; BUI Inno Setup Installer Script
+; Creates a professional Windows installer for BUI
 
-#define MyAppName "BLine"
+#define MyAppName "BUI"
 ; Version can be overridden via command line: ISCC /DMyAppVersion=x.y.z installer.iss
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0"
 #endif
 #define MyAppPublisher "FRC Team 2638 Rebel Robotics"
-#define MyAppURL "https://github.com/edanliahovetsky/BLine-GUI"
-#define MyAppExeName "BLine.exe"
+#define MyAppURL "https://github.com/2638/bui"
+#define MyAppExeName "BUI.exe"
 
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application.
-AppId={{8F2A3B4C-5D6E-7F8A-9B0C-1D2E3F4A5B6C}
+AppId={{72E4B29F-86DA-4AA9-8C33-4B8DC80BE874}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -24,8 +24,8 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 LicenseFile=..\LICENSE
 OutputDir=.\
-OutputBaseFilename=BLine-{#MyAppVersion}-Setup
-SetupIconFile=bline.ico
+OutputBaseFilename=BUI-{#MyAppVersion}-Setup
+SetupIconFile=bui.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -40,7 +40,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked; OnlyBelowVersion: 6.1; Check: not IsAdminInstallMode
 
 [Files]
-Source: "dist\BLine\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\BUI\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]

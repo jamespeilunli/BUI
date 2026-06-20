@@ -393,8 +393,8 @@ class ProjectManager:
     Persists last project dir and last opened path via QSettings.
     """
 
-    SETTINGS_ORG = "FRC-PTP-GUI"
-    SETTINGS_APP = "FRC-PTP-GUI"
+    SETTINGS_ORG = "BUI"
+    SETTINGS_APP = "BUI"
     KEY_LAST_PROJECT_DIR = "project/last_project_dir"
     KEY_LAST_PATH_FILE = "project/last_path_file"
     KEY_RECENT_PROJECTS = "project/recent_projects"

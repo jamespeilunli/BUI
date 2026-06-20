@@ -1,12 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec file for BLine macOS .app bundle
+# PyInstaller spec file for BUI macOS .app bundle
 
 from pathlib import Path
 
 project_dir = Path(SPECPATH).parent
 assets_dir = project_dir / 'assets'
 build_dir = Path(SPECPATH) / 'build'
-icns_path = build_dir / 'BLine.icns'
+icns_path = build_dir / 'BUI.icns'
 
 a = Analysis(
     [str(project_dir / 'main.py')],
@@ -35,7 +35,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='BLine',
+    name='BUI',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -57,12 +57,12 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='BLine',
+    name='BUI',
 )
 
 app = BUNDLE(
     coll,
-    name='BLine.app',
+    name='BUI.app',
     icon=str(icns_path) if icns_path.exists() else None,
-    bundle_identifier='com.bline.app',
+    bundle_identifier='org.frc2638.bui',
 )

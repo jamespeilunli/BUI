@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec file for BLine Windows executable
+# PyInstaller spec file for BUI Windows executable
 
 import sys
 from pathlib import Path
@@ -48,7 +48,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='BLine',
+    name='BUI',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -70,5 +70,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='BLine',
+    name='BUI',
 )

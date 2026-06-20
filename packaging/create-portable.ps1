@@ -1,17 +1,17 @@
-# BLine Portable ZIP Creation Script
+# BUI Portable ZIP Creation Script
 # Creates a portable ZIP package for Windows (no installation required)
 
 $ErrorActionPreference = "Stop"
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Creating BLine Portable ZIP" -ForegroundColor Cyan
+Write-Host "Creating BUI Portable ZIP" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Get script directory
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Split-Path -Parent $ScriptDir
-$DistDir = Join-Path $ScriptDir "dist\BLine"
+$DistDir = Join-Path $ScriptDir "dist\BUI"
 
 # Get version from pyproject.toml
 $PyProjectPath = Join-Path $ProjectDir "pyproject.toml"
@@ -24,7 +24,7 @@ if ($PyProjectContent -match 'version\s*=\s*"([^"]+)"') {
     $Version = "0.0.0"
 }
 
-$ZipName = "BLine-${Version}-Windows-Portable.zip"
+$ZipName = "BUI-${Version}-Windows-Portable.zip"
 $ZipPath = Join-Path $ProjectDir $ZipName
 
 # Check if build exists
@@ -43,14 +43,14 @@ if (Test-Path $ZipPath) {
 # Create README for portable version
 $ReadmePath = Join-Path $DistDir "README.txt"
 $ReadmeContent = @"
-BLine Portable - Version $Version
-=================================
+BUI Portable - Version $Version
+===============================
 
-This is a portable version of BLine that requires no installation.
+This is a portable version of BUI that requires no installation.
 
 QUICK START:
 1. Extract this ZIP to any folder
-2. Double-click BLine.exe to run
+2. Double-click BUI.exe to run
 3. That's it!
 
 FEATURES:
@@ -64,10 +64,10 @@ SYSTEM REQUIREMENTS:
 - No additional software needed (everything is bundled)
 
 SUPPORT:
-For issues, please visit: https://github.com/edanliahovetsky/BLine-GUI/issues
+For issues, please visit: https://github.com/2638/bui/issues
 
 LICENSE:
-BLine is licensed under the BSD 3-Clause License.
+BUI is licensed under the BSD 3-Clause License.
 See LICENSE file for details.
 
 Copyright (c) 2025 FRC Team 2638 Rebel Robotics
@@ -98,7 +98,7 @@ if (Test-Path $ZipPath) {
     Write-Host "ZIP location: $ZipPath" -ForegroundColor Cyan
     Write-Host "Size: $([math]::Round($ZipFile.Length / 1MB, 2)) MB" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "Users can extract this ZIP anywhere and run BLine.exe" -ForegroundColor Yellow
+    Write-Host "Users can extract this ZIP anywhere and run BUI.exe" -ForegroundColor Yellow
     Write-Host ""
 } else {
     Write-Host ""
