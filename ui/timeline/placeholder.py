@@ -54,7 +54,7 @@ from ui.sidebar.utils.ranged_constraint_ui import get_constraint_domain_elements
 
 HEADER_WIDTH = 216
 TRACK_PADDING_X = 12
-TIMELINE_RIGHT_OVERSCROLL_PX = 600
+TIMELINE_MAX_TIME_S = 180.0
 TOP_PADDING = 8
 BOTTOM_PADDING = 8
 RULER_HEIGHT = 22
@@ -563,14 +563,16 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def sizeHint(self) -> QSize:
         track_width = int(round(max(self._projection.display_s_m, 0.0) * self._zoom_px_per_m))
         base = super().sizeHint()
-        timeline_width = TRACK_PADDING_X * 2 + max(1, track_width) + TIMELINE_RIGHT_OVERSCROLL_PX
+        timeline_width = TRACK_PADDING_X * 2 + max(1, track_width)
         return QSize(timeline_width, base.height())
 
     def _track_left(self) -> float:
         return float(TRACK_PADDING_X)
 
     def _track_right(self) -> float:
-        return float(self.width() - TRACK_PADDING_X)
+        return self._track_left() + (
+            max(0.0, float(self._projection.display_s_m)) * float(self._zoom_px_per_m)
+        )
 
     def _track_width(self) -> float:
         return max(1.0, self._track_right() - self._track_left())
@@ -584,8 +586,7 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         return self._track_left() + s_m * self._zoom_px_per_m
 
     def _ruler_end_s(self) -> float:
-        visible_s = self._track_width() / max(1.0, float(self._zoom_px_per_m))
-        return max(float(self._projection.display_s_m), visible_s)
+        return max(0.0, float(self._projection.display_s_m))
 
     def _track_rect_for_row(self, row_top: int, row_height: int) -> QRectF:
         vertical_padding = max(0.5, min(5.0, float(row_height) * 0.12))
@@ -2317,6 +2318,8 @@ class TimelineDock(QFrame):
 
     def fit_to_all(self) -> None:
         self._set_zoom_px_per_m(self._fit_zoom_px_per_m())
+        hbar = self._track_scroll.horizontalScrollBar()
+        hbar.setValue(hbar.minimum())
 
     def _adjust_zoom(self, delta: int) -> None:
         self._zoom_slider.setValue(self._zoom_slider.value() + int(delta))
@@ -2435,12 +2438,19 @@ class TimelineDock(QFrame):
         )
 
     def _fit_zoom_px_per_m(self) -> int:
-        display_s_m = max(self._projection.display_s_m, 0.0)
-        if display_s_m <= 0.0:
+        fit_s_m = self._fit_content_s_m()
+        if fit_s_m <= 0.0:
             return MIN_ZOOM_PX_PER_M
         viewport_width = max(1, self._track_scroll.viewport().width() - TRACK_PADDING_X * 2)
-        zoom = int(round(viewport_width / display_s_m))
+        zoom = int(round(viewport_width / fit_s_m))
         return max(MIN_ZOOM_PX_PER_M, min(MAX_ZOOM_PX_PER_M, zoom))
+
+    def _fit_content_s_m(self) -> float:
+        path_duration_s = max(0.0, float(getattr(self._projection, "total_s_m", 0.0)))
+        if path_duration_s > 1e-9:
+            return min(path_duration_s, max(0.0, float(self._projection.display_s_m)))
+        has_markers = any(row.markers for row in getattr(self._projection, "rows", []) or [])
+        return 1.0 if has_markers else 0.0
 
     def _update_minimum_zoom(self, *, enforce_current: bool) -> None:
         self._minimum_zoom_px_per_m = MIN_ZOOM_PX_PER_M
@@ -2459,14 +2469,10 @@ class TimelineDock(QFrame):
         path_width = int(
             round(max(self._projection.display_s_m, 0.0) * self._track_canvas._zoom_px_per_m)
         )
-        right_overscroll_width = max(
-            TIMELINE_RIGHT_OVERSCROLL_PX,
-            track_viewport_width * 2,
-        )
         track_width = max(
             track_hint.width(),
             track_viewport_width,
-            TRACK_PADDING_X * 2 + path_width + right_overscroll_width,
+            TRACK_PADDING_X * 2 + path_width,
         )
         track_height = max(1, viewport_height)
 
@@ -3749,7 +3755,7 @@ def _map_projection_distance_to_time(
                 span.end_s_m = mapper(span.end_s_m)
 
     projection.total_s_m = total_t
-    projection.display_s_m = max(1.0, total_t)
+    projection.display_s_m = TIMELINE_MAX_TIME_S
 
 
 def _build_time_mapper(

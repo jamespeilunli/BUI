@@ -9,6 +9,8 @@ from ui.timeline.placeholder import (
     MAX_ZOOM_PX_PER_M,
     MIN_ZOOM_PX_PER_M,
     PLAYBACK_STEP_S,
+    TIMELINE_MAX_TIME_S,
+    TRACK_PADDING_X,
     TimelineDock,
     TimelineSelection,
     _format_timecode,
@@ -162,6 +164,65 @@ def test_fit_to_all_uses_minimum_zoom_for_empty_or_tiny_paths(qt_app):
         dock.close()
 
 
+def test_fit_to_all_scrolls_back_to_frame_path_start_and_end(qt_app):
+    dock = TimelineDock(
+        Path(path_elements=[TranslationTarget(0.0, 0.0), TranslationTarget(30.0, 0.0)])
+    )
+    try:
+        dock.resize(640, 240)
+        dock.show()
+        qt_app.processEvents()
+        dock._sync_canvas_size()
+        dock._set_zoom_px_per_m(240)
+        qt_app.processEvents()
+
+        hbar = dock._track_scroll.horizontalScrollBar()
+        hbar.setValue(max(0, hbar.maximum() // 2))
+        assert hbar.value() > hbar.minimum()
+
+        dock.fit_to_all()
+        qt_app.processEvents()
+
+        path_end_x = dock._track_canvas._x_for_s(dock._projection.total_s_m)
+        visible_left = float(hbar.value())
+        visible_right = visible_left + float(dock._track_scroll.viewport().width())
+
+        assert hbar.value() == hbar.minimum()
+        assert dock._track_canvas._x_for_s(0.0) >= visible_left
+        assert path_end_x <= visible_right
+    finally:
+        dock.close()
+
+
+def test_timeline_axis_end_is_fixed_and_scrollable_across_zoom_levels(qt_app):
+    dock = TimelineDock(
+        Path(path_elements=[TranslationTarget(0.0, 0.0), TranslationTarget(2.0, 0.0)])
+    )
+    try:
+        dock.resize(900, 240)
+        dock.show()
+        qt_app.processEvents()
+
+        for zoom in (MIN_ZOOM_PX_PER_M, 180, MAX_ZOOM_PX_PER_M):
+            dock._set_zoom_px_per_m(zoom)
+            qt_app.processEvents()
+            dock._sync_canvas_size()
+
+            end_x = TRACK_PADDING_X + (TIMELINE_MAX_TIME_S * zoom)
+            hbar = dock._track_scroll.horizontalScrollBar()
+            expected_max_scroll = max(
+                0,
+                int(round(end_x + TRACK_PADDING_X)) - dock._track_scroll.viewport().width(),
+            )
+
+            assert dock._projection.display_s_m == TIMELINE_MAX_TIME_S
+            assert dock._track_canvas._ruler_end_s() == TIMELINE_MAX_TIME_S
+            assert dock._track_canvas._x_for_s(TIMELINE_MAX_TIME_S) == end_x
+            assert hbar.maximum() == expected_max_scroll
+    finally:
+        dock.close()
+
+
 def test_zoom_from_wheel_keeps_content_under_cursor_stable(qt_app):
     dock = _show_zoomed_timeline(qt_app)
     try:
@@ -199,7 +260,8 @@ def test_zoom_from_wheel_anchors_empty_time_beyond_path_end(qt_app):
         viewport_x = 650.0
         before_zoom = float(dock._track_canvas._zoom_px_per_m)
         before_s = (hbar.value() + viewport_x - dock._track_canvas._track_left()) / before_zoom
-        assert before_s > dock._projection.display_s_m
+        assert before_s > dock._projection.total_s_m
+        assert before_s < dock._projection.display_s_m
 
         dock._zoom_from_wheel(120, viewport_x, dock._track_scroll.viewport())
         qt_app.processEvents()

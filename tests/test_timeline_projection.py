@@ -14,6 +14,7 @@ from models.path_model import (
 from ui.timeline.placeholder import (
     HEADER_WIDTH,
     ROTATION_CONSTRAINT_ROW_TITLE,
+    TIMELINE_MAX_TIME_S,
     TRACK_PADDING_X,
     TimelineDock,
     TRANSLATION_CONSTRAINT_ROW_TITLE,
@@ -65,7 +66,7 @@ def test_projection_uses_configured_fallback_velocity_for_time_axis():
     assert projection.axis_label == ""
     assert projection.axis_unit == "s"
     assert math.isclose(projection.total_s_m, 3.0)
-    assert math.isclose(projection.display_s_m, 3.0)
+    assert math.isclose(projection.display_s_m, TIMELINE_MAX_TIME_S)
     assert [marker.label for marker in structure.markers] == ["T1", "W1", "R1", "T2"]
     assert [round(marker.s_m, 4) for marker in structure.markers] == [0.0, 1.0, 2.0, 3.0]
     assert triggers.markers[0].label == "intake"
@@ -118,7 +119,7 @@ def test_projection_falls_back_when_simulation_samples_are_unusable(monkeypatch)
     )
 
     assert math.isclose(projection.total_s_m, 2.0)
-    assert math.isclose(projection.display_s_m, 2.0)
+    assert math.isclose(projection.display_s_m, TIMELINE_MAX_TIME_S)
 
 
 def test_closest_time_for_point_limits_candidates_by_expected_progress():
@@ -165,7 +166,8 @@ def test_timeline_canvas_geometry_keeps_header_and_track_alignment(qt_app, mixed
         assert dock._rail_scroll.width() == HEADER_WIDTH
         assert dock._track_canvas._track_left() == float(TRACK_PADDING_X)
         assert dock._track_canvas._x_for_s(0.0) == float(TRACK_PADDING_X)
-        assert dock._track_canvas._ruler_end_s() >= dock._projection.display_s_m
+        assert math.isclose(dock._projection.display_s_m, TIMELINE_MAX_TIME_S)
+        assert math.isclose(dock._track_canvas._ruler_end_s(), TIMELINE_MAX_TIME_S)
 
         rows = dock._projection.rows
         layout = dock._track_canvas._row_layout()

@@ -62,13 +62,13 @@
     {
       "type": "rotation",
       "rotation_radians": 0.0,
-      "t_ratio": 0.3500960795551698,
+      "t_ratio": 0.3500960795551693,
       "profiled_rotation": true
     },
     {
       "type": "translation",
-      "x_meters": 8.618473892181584,
-      "y_meters": 4.024898734342566,
+      "x_meters": 8.501549398627256,
+      "y_meters": 4.9268876846188085,
       "intermediate_handoff_radius_meters": 0.25
     },
     {
@@ -91,14 +91,7 @@
     }
   ],
   "constraints": {
-    "default_max_velocity_meters_per_sec": 2.2,
-    "max_velocity_meters_per_sec": [
-      {
-        "value": 0.5,
-        "start_ordinal": 4,
-        "end_ordinal": 7
-      }
-    ],
+    "max_velocity_meters_per_sec": 2.2,
     "max_velocity_deg_per_sec": [
       {
         "value": 720.0,
