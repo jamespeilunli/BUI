@@ -61,6 +61,8 @@ from .items.elements import (
 )
 from .items.sim import RobotSimItem
 
+SIMULATED_PATH_DISPLAY_MODES = {"hidden", "to_current_time", "complete"}
+
 
 def _get_translation_position(element: Any) -> Tuple[float, float]:
     """Get the translation position (x, y) from a TranslationTarget or Waypoint element."""
@@ -186,6 +188,7 @@ class CanvasView(QGraphicsView):
         self._trail_lines: List[QGraphicsLineItem] = []
         self._trail_points: List[Tuple[float, float]] = []
         self._trail_visible_count: int = 0
+        self._simulated_path_display_mode: str = "to_current_time"
         self._range_overlay_lines: List[QGraphicsLineItem] = []
         self._range_overlay_saved_item_styles: dict[QGraphicsItem, Tuple[QPen, QBrush]] = {}
         # Constraint popout sync state
@@ -1706,14 +1709,54 @@ class CanvasView(QGraphicsView):
                 self.graphics_scene.addItem(line)
                 self._trail_lines.append(line)
             self._trail_visible_count = 0
+            self._refresh_simulated_path_visibility()
         except Exception:
             pass
+
+    def set_simulated_path_display_mode(self, mode: str) -> None:
+        normalized = str(mode or "").strip().lower()
+        if normalized not in SIMULATED_PATH_DISPLAY_MODES:
+            return
+        if normalized == self._simulated_path_display_mode:
+            return
+        self._simulated_path_display_mode = normalized
+        self._refresh_simulated_path_visibility()
+
+    def simulated_path_display_mode(self) -> str:
+        return str(self._simulated_path_display_mode)
+
+    def _trail_index_for_current_time(self) -> int:
+        if not self._sim_times_sorted:
+            return 0
+        try:
+            idx = bisect.bisect_left(self._sim_times_sorted, float(self._sim_current_time_s))
+            if idx <= 0:
+                return 0
+            if idx >= len(self._sim_times_sorted):
+                return len(self._sim_times_sorted) - 1
+            return max(0, idx - 1)
+        except Exception:
+            return 0
+
+    def _target_trail_visible_count(self, current_index: int) -> int:
+        try:
+            mode = str(self._simulated_path_display_mode)
+            if mode == "hidden":
+                return 0
+            if mode == "complete":
+                return len(self._trail_lines)
+            return max(0, min(int(current_index), len(self._trail_lines)))
+        except Exception:
+            return 0
+
+    def _refresh_simulated_path_visibility(self) -> None:
+        self._update_trail_visibility(self._trail_index_for_current_time())
 
     def _update_trail_visibility(self, current_index: int):
         try:
             if not self._trail_points or not self._trail_lines:
                 return
-            target = max(0, min(int(current_index), len(self._trail_lines)))
+            target = self._target_trail_visible_count(current_index)
             prev = int(getattr(self, "_trail_visible_count", 0))
             if target == prev:
                 return

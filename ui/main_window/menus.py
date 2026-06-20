@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import QPoint
 from PySide6.QtGui import (
     QAction,
+    QActionGroup,
     QIcon,
     QPen,
     QBrush,
@@ -136,6 +137,29 @@ def build_menu_bar(window: "MainWindow") -> None:
     window.action_redo.triggered.connect(window._action_redo)
     window.action_redo.setEnabled(False)
     edit_menu.addAction(window.action_redo)
+
+    view_menu: QMenu = bar.addMenu("View")
+    window.menu_simulated_path = view_menu.addMenu("Simulated Path")
+    window.action_group_simulated_path = QActionGroup(window)
+    window.action_group_simulated_path.setExclusive(True)
+    window.action_simulated_path_hidden = QAction("Hidden", window)
+    window.action_simulated_path_to_current_time = QAction("To Current Time", window)
+    window.action_simulated_path_complete = QAction("Complete", window)
+    simulated_path_actions = [
+        (window.action_simulated_path_hidden, "hidden"),
+        (window.action_simulated_path_to_current_time, "to_current_time"),
+        (window.action_simulated_path_complete, "complete"),
+    ]
+    for action, mode in simulated_path_actions:
+        action.setCheckable(True)
+        action.triggered.connect(
+            lambda checked=False, selected_mode=mode: window._action_set_simulated_path_display_mode(
+                selected_mode
+            )
+        )
+        window.action_group_simulated_path.addAction(action)
+        window.menu_simulated_path.addAction(action)
+    window.action_simulated_path_to_current_time.setChecked(True)
 
     settings_menu: QMenu = bar.addMenu("Settings")
     window.action_edit_config = QAction("Edit Config…", window)

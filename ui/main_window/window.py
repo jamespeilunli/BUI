@@ -389,6 +389,26 @@ class MainWindow(WindowEventMixin, QMainWindow):
             pass
         return {}
 
+    def _action_set_simulated_path_display_mode(self, mode: str) -> None:
+        normalized = str(mode or "").strip().lower()
+        if normalized not in {"hidden", "to_current_time", "complete"}:
+            return
+        try:
+            self.canvas.set_simulated_path_display_mode(normalized)
+        except Exception:
+            pass
+        action_by_mode = {
+            "hidden": getattr(self, "action_simulated_path_hidden", None),
+            "to_current_time": getattr(self, "action_simulated_path_to_current_time", None),
+            "complete": getattr(self, "action_simulated_path_complete", None),
+        }
+        action = action_by_mode.get(normalized)
+        try:
+            if action is not None:
+                action.setChecked(True)
+        except Exception:
+            pass
+
     def _apply_default_splitter_sizes(self):
         """Apply Phase 1 default proportions after the window has geometry."""
         try:

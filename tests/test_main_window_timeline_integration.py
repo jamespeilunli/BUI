@@ -32,6 +32,37 @@ def _simple_path() -> Path:
     )
 
 
+def test_view_menu_simulated_path_actions_update_canvas_mode(qt_app):
+    window = _new_window()
+    try:
+        assert window.menu_simulated_path.title() == "Simulated Path"
+        assert [action.text() for action in window.action_group_simulated_path.actions()] == [
+            "Hidden",
+            "To Current Time",
+            "Complete",
+        ]
+        assert window.action_simulated_path_to_current_time.isChecked()
+        assert all(action.isCheckable() for action in window.action_group_simulated_path.actions())
+
+        window.action_simulated_path_complete.trigger()
+
+        assert window.canvas.simulated_path_display_mode() == "complete"
+        assert window.action_simulated_path_complete.isChecked()
+        assert not window.action_simulated_path_to_current_time.isChecked()
+
+        window.action_simulated_path_hidden.trigger()
+
+        assert window.canvas.simulated_path_display_mode() == "hidden"
+        assert window.action_simulated_path_hidden.isChecked()
+
+        window.action_simulated_path_to_current_time.trigger()
+
+        assert window.canvas.simulated_path_display_mode() == "to_current_time"
+        assert window.action_simulated_path_to_current_time.isChecked()
+    finally:
+        window.close()
+
+
 def test_timeline_path_selection_signal_updates_sidebar_and_canvas(
     qt_app,
     install_main_window_path,
