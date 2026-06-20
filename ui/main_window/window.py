@@ -91,13 +91,13 @@ class MainWindow(WindowEventMixin, QMainWindow):
         except Exception:
             pass
 
-        self.workspace_splitter = QSplitter(Qt.Horizontal)
+        self.workspace_splitter = QSplitter(Qt.Vertical)
         self.workspace_splitter.setObjectName("mainWorkspaceSplitter")
         self.workspace_splitter.setChildrenCollapsible(False)
         self.workspace_splitter.setHandleWidth(6)
         layout.addWidget(self.workspace_splitter)
 
-        self.editor_splitter = QSplitter(Qt.Vertical)
+        self.editor_splitter = QSplitter(Qt.Horizontal)
         self.editor_splitter.setObjectName("editorSplitter")
         self.editor_splitter.setChildrenCollapsible(False)
         self.editor_splitter.setHandleWidth(6)
@@ -107,11 +107,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
         self.canvas = CanvasView()
         self.editor_splitter.addWidget(self.canvas)
 
-        # Timeline dock shell (bottom-left)
-        self.timeline = TimelinePlaceholder(self.path, None)
-        self.editor_splitter.addWidget(self.timeline)
-
-        # Placeholder for sidebar (right)
+        # Sidebar (top-right)
         self.sidebar = Sidebar()
         # Provide project manager to sidebar for config defaults
         self.sidebar.project_manager = self.project_manager
@@ -120,7 +116,11 @@ class MainWindow(WindowEventMixin, QMainWindow):
         # Connect canvas to undo manager (no longer needed for toolbar, but keep for other features)
         # self.canvas.set_undo_redo_manager(self.undo_manager)
         self.sidebar.set_path(self.path)
-        self.workspace_splitter.addWidget(self.sidebar)
+        self.editor_splitter.addWidget(self.sidebar)
+
+        # Timeline dock shell (full-width bottom)
+        self.timeline = TimelinePlaceholder(self.path, None)
+        self.workspace_splitter.addWidget(self.timeline)
 
         self._configure_splitters()
 
@@ -427,12 +427,12 @@ class MainWindow(WindowEventMixin, QMainWindow):
             total_width = max(self.centralWidget().width(), 1000)
             total_height = max(self.centralWidget().height(), 760)
             sidebar_width = max(280, min(340, int(total_width * 0.24)))
-            left_width = max(520, total_width - sidebar_width)
+            field_width = max(520, total_width - sidebar_width)
             timeline_height = max(180, int(total_height * 0.32))
-            field_height = max(260, total_height - timeline_height)
+            top_height = max(260, total_height - timeline_height)
 
-            self.workspace_splitter.setSizes([left_width, sidebar_width])
-            self.editor_splitter.setSizes([field_height, timeline_height])
+            self.workspace_splitter.setSizes([top_height, timeline_height])
+            self.editor_splitter.setSizes([field_width, sidebar_width])
         except Exception:
             pass
 

@@ -11,6 +11,7 @@ from ui.timeline.placeholder import (
     PLAYBACK_STEP_S,
     TimelineDock,
     TimelineSelection,
+    _format_timecode,
 )
 
 
@@ -62,22 +63,27 @@ def _show_zoomed_timeline(qt_app) -> TimelineDock:
     return dock
 
 
-def test_playback_state_updates_button_label_and_playhead(qt_app, mixed_path):
+def test_playback_state_updates_icon_timecode_and_playhead(qt_app, mixed_path):
     dock = TimelineDock(mixed_path)
     try:
         dock.set_playback_state(0.75, 2.0, is_playing=True, enabled=True)
 
         assert dock._play_pause_btn.isEnabled()
-        assert dock._play_pause_btn.text() == "Pause"
-        assert "Playing at 0.75 / 2.00 s" == dock._playback_label.text()
+        assert dock._play_pause_btn.text() == ""
+        assert not dock._play_pause_btn.icon().isNull()
+        assert dock._play_pause_btn.toolTip() == "Pause"
+        assert dock._time_current_label.text() == "0.75"
+        assert dock._time_total_label.text() == "2.00 s"
         assert dock._track_canvas._is_playing is True
         assert dock._track_canvas._playhead_s_m == 0.75
 
         dock.set_playback_state(9.0, 0.0, is_playing=True, enabled=False)
 
         assert not dock._play_pause_btn.isEnabled()
-        assert dock._play_pause_btn.text() == "Play"
-        assert dock._playback_label.text() == "No simulation at 9.00 / 0.00 s"
+        assert dock._play_pause_btn.text() == ""
+        assert dock._play_pause_btn.toolTip() == "Play"
+        assert dock._time_current_label.text() == "9.00"
+        assert dock._time_total_label.text() == "0.00 s"
         assert dock._track_canvas._is_playing is False
     finally:
         dock.close()
@@ -102,18 +108,48 @@ def test_timeline_keyboard_shortcuts_emit_transport_requests(qt_app, mixed_path)
         dock.close()
 
 
-def test_zoom_slider_round_trip_respects_dynamic_minimum(qt_app, mixed_path):
+def test_zoom_slider_round_trip_uses_absolute_range(qt_app, mixed_path):
     dock = TimelineDock(mixed_path)
     try:
-        dock._minimum_zoom_px_per_m = 40
-        for zoom in (40, 80, 200, MAX_ZOOM_PX_PER_M):
+        dock._minimum_zoom_px_per_m = 400
+        for zoom in (MIN_ZOOM_PX_PER_M, 80, 200, MAX_ZOOM_PX_PER_M):
             slider_value = dock._slider_value_from_zoom(zoom)
             round_trip = dock._zoom_value_from_slider(slider_value)
-            assert round_trip >= 40
+            assert round_trip >= MIN_ZOOM_PX_PER_M
             assert abs(round_trip - zoom) <= max(3, int(zoom * 0.08))
 
-        assert dock._zoom_value_from_slider(-999) >= 40
+        assert dock._zoom_value_from_slider(-999) == MIN_ZOOM_PX_PER_M
         assert dock._zoom_value_from_slider(999) <= MAX_ZOOM_PX_PER_M
+    finally:
+        dock.close()
+
+
+def test_timecode_format_uses_no_leading_zero_padding():
+    first = _format_timecode(7.23, 20.0)
+    second = _format_timecode(12.23, 20.0)
+
+    assert first == "7.23 / 20.00 s"
+    assert second == "12.23 / 20.00 s"
+    assert not first.startswith("0")
+
+
+def test_timecode_labels_hold_stable_width_without_leading_zeroes(qt_app, mixed_path):
+    dock = TimelineDock(mixed_path)
+    try:
+        current_width = dock._time_current_label.width()
+        total_width = dock._time_total_label.width()
+
+        dock.set_playback_state(7.23, 20.0, is_playing=False, enabled=True)
+        assert dock._time_current_label.text() == "7.23"
+        assert dock._time_total_label.text() == "20.00 s"
+        assert dock._time_current_label.width() == current_width
+        assert dock._time_total_label.width() == total_width
+
+        dock.set_playback_state(12.23, 20.0, is_playing=False, enabled=True)
+        assert dock._time_current_label.text() == "12.23"
+        assert dock._time_total_label.text() == "20.00 s"
+        assert dock._time_current_label.width() == current_width
+        assert dock._time_total_label.width() == total_width
     finally:
         dock.close()
 
@@ -142,6 +178,36 @@ def test_zoom_from_wheel_keeps_content_under_cursor_stable(qt_app):
 
         assert after_zoom > before_zoom
         assert abs(after_s - before_s) < 0.05
+    finally:
+        dock.close()
+
+
+def test_zoom_from_wheel_anchors_empty_time_beyond_path_end(qt_app):
+    dock = TimelineDock(
+        Path(path_elements=[TranslationTarget(0.0, 0.0), TranslationTarget(2.0, 0.0)])
+    )
+    try:
+        dock.resize(900, 240)
+        dock.show()
+        qt_app.processEvents()
+        dock._sync_canvas_size()
+        dock._set_zoom_px_per_m(MIN_ZOOM_PX_PER_M)
+        qt_app.processEvents()
+
+        hbar = dock._track_scroll.horizontalScrollBar()
+        hbar.setValue(0)
+        viewport_x = 650.0
+        before_zoom = float(dock._track_canvas._zoom_px_per_m)
+        before_s = (hbar.value() + viewport_x - dock._track_canvas._track_left()) / before_zoom
+        assert before_s > dock._projection.display_s_m
+
+        dock._zoom_from_wheel(120, viewport_x, dock._track_scroll.viewport())
+        qt_app.processEvents()
+
+        after_zoom = float(dock._track_canvas._zoom_px_per_m)
+        after_s = (hbar.value() + viewport_x - dock._track_canvas._track_left()) / after_zoom
+        assert after_zoom > before_zoom
+        assert abs(after_s - before_s) < 0.2
     finally:
         dock.close()
 

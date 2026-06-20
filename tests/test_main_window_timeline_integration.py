@@ -13,6 +13,7 @@ from models.path_model import (
     Waypoint,
 )
 from ui.main_window.window import MainWindow
+from ui.qt_compat import Qt
 from ui.timeline.placeholder import StructurePlacement, TriggerPlacement
 from utils.project_manager import ProjectManager
 
@@ -45,6 +46,26 @@ def _simple_path() -> Path:
             TranslationTarget(4.0, 0.0),
         ]
     )
+
+
+def test_main_window_places_timeline_full_width_below_top_editor(qt_app, process_events):
+    window = _new_window()
+    try:
+        window.resize(1200, 800)
+        window.show()
+        process_events()
+        window._apply_default_splitter_sizes()
+        process_events()
+
+        assert window.workspace_splitter.orientation() == Qt.Vertical
+        assert window.editor_splitter.orientation() == Qt.Horizontal
+        assert window.workspace_splitter.indexOf(window.editor_splitter) == 0
+        assert window.workspace_splitter.indexOf(window.timeline) == 1
+        assert window.editor_splitter.indexOf(window.canvas) == 0
+        assert window.editor_splitter.indexOf(window.sidebar) == 1
+        assert window.timeline.width() >= window.editor_splitter.width() - 2
+    finally:
+        window.close()
 
 
 def test_view_menu_simulated_path_actions_update_canvas_mode(qt_app):

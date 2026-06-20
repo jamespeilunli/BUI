@@ -21,6 +21,7 @@ from ui.timeline.placeholder import (
     _build_projection,
     _closest_time_for_point,
     _format_axis_label,
+    _minor_ruler_step,
     _nice_ruler_step,
     TimelineSpan,
 )
@@ -61,7 +62,7 @@ def test_projection_uses_configured_fallback_velocity_for_time_axis():
     triggers = next(row for row in projection.rows if row.title == "Triggers")
     constraints = _constraint_row_for_key(projection, "max_velocity_meters_per_sec")
 
-    assert projection.axis_label == "Estimated Time"
+    assert projection.axis_label == ""
     assert projection.axis_unit == "s"
     assert math.isclose(projection.total_s_m, 3.0)
     assert math.isclose(projection.display_s_m, 3.0)
@@ -135,6 +136,8 @@ def test_closest_time_for_point_limits_candidates_by_expected_progress():
 def test_ruler_label_density_helpers_are_stable():
     assert _nice_ruler_step(1000.0) == 0.1
     assert _nice_ruler_step(44.0) == 2.0
+    assert math.isclose(_minor_ruler_step(0.1), 0.02)
+    assert math.isclose(_minor_ruler_step(2.0), 0.5)
     assert _format_axis_label(1.25, 0.5, "s") == "1.2 s"
     assert _format_axis_label(12.0, 2.0, "s") == "12 s"
 
@@ -162,6 +165,7 @@ def test_timeline_canvas_geometry_keeps_header_and_track_alignment(qt_app, mixed
         assert dock._rail_scroll.width() == HEADER_WIDTH
         assert dock._track_canvas._track_left() == float(TRACK_PADDING_X)
         assert dock._track_canvas._x_for_s(0.0) == float(TRACK_PADDING_X)
+        assert dock._track_canvas._ruler_end_s() >= dock._projection.display_s_m
 
         rows = dock._projection.rows
         layout = dock._track_canvas._row_layout()

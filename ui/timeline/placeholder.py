@@ -9,7 +9,17 @@ import re
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import QEvent, QRectF, QSize, Signal, QTimer
-from PySide6.QtGui import QColor, QCursor, QMouseEvent, QPainter, QPen, QPolygonF
+from PySide6.QtGui import (
+    QColor,
+    QCursor,
+    QFontDatabase,
+    QIcon,
+    QMouseEvent,
+    QPainter,
+    QPen,
+    QPixmap,
+    QPolygonF,
+)
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -42,8 +52,9 @@ from ui.sidebar.utils import (
 from ui.sidebar.utils.ranged_constraint_ui import get_constraint_domain_elements
 
 
-HEADER_WIDTH = 144
+HEADER_WIDTH = 216
 TRACK_PADDING_X = 12
+TIMELINE_RIGHT_OVERSCROLL_PX = 600
 TOP_PADDING = 8
 BOTTOM_PADDING = 8
 RULER_HEIGHT = 22
@@ -53,7 +64,7 @@ MIN_ROW_HEIGHT = 22
 MIN_SPAN_ROW_HEIGHT = 18
 MIN_LANE_HEIGHT = 5
 MIN_LANE_GAP = 2
-MIN_ZOOM_PX_PER_M = 24
+MIN_ZOOM_PX_PER_M = 25
 MAX_ZOOM_PX_PER_M = 1200
 DEFAULT_ZOOM_PX_PER_M = 72
 ZOOM_SLIDER_MIN = 0
@@ -367,9 +378,6 @@ class _TimelineRailCanvas(_TimelineCanvasBase):
         top = TOP_PADDING
         painter.fillRect(QRectF(0, top, HEADER_WIDTH, RULER_HEIGHT), QColor("#171717"))
 
-        painter.setPen(QColor("#6d737c"))
-        painter.drawText(14, top + 18, self._projection.axis_label)
-
     def _draw_row(
         self, painter: QPainter, row: TimelineRow, y: int, row_height: int, index: int
     ) -> None:
@@ -555,7 +563,8 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def sizeHint(self) -> QSize:
         track_width = int(round(max(self._projection.display_s_m, 0.0) * self._zoom_px_per_m))
         base = super().sizeHint()
-        return QSize(TRACK_PADDING_X * 2 + max(1, track_width), base.height())
+        timeline_width = TRACK_PADDING_X * 2 + max(1, track_width) + TIMELINE_RIGHT_OVERSCROLL_PX
+        return QSize(timeline_width, base.height())
 
     def _track_left(self) -> float:
         return float(TRACK_PADDING_X)
@@ -569,6 +578,14 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def _x_for_s(self, s_m: float) -> float:
         s_m = max(0.0, min(float(s_m), self._projection.display_s_m))
         return self._track_left() + s_m * self._zoom_px_per_m
+
+    def _x_for_time(self, s_m: float) -> float:
+        s_m = max(0.0, float(s_m))
+        return self._track_left() + s_m * self._zoom_px_per_m
+
+    def _ruler_end_s(self) -> float:
+        visible_s = self._track_width() / max(1.0, float(self._zoom_px_per_m))
+        return max(float(self._projection.display_s_m), visible_s)
 
     def _track_rect_for_row(self, row_top: int, row_height: int) -> QRectF:
         vertical_padding = max(0.5, min(5.0, float(row_height) * 0.12))
@@ -671,24 +688,37 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         painter.fillRect(QRectF(0, top, self.width(), RULER_HEIGHT), QColor("#181818"))
 
         base_y = bottom - 1
-        painter.setPen(QPen(QColor("#3b4148"), 1))
+        painter.setPen(QPen(QColor("#59636e"), 1))
         painter.drawLine(int(self._track_left()), base_y, int(self._track_right()), base_y)
 
         step_m = _nice_ruler_step(self._zoom_px_per_m)
+        minor_step_m = _minor_ruler_step(step_m)
+        ruler_end_s = self._ruler_end_s()
         metrics = painter.fontMetrics()
         label_y = top + 14
-        tick_top = bottom - 8
+        minor_tick_top = bottom - 5
+        tick_top = bottom - 9
         tick_bottom = bottom - 1
 
+        if minor_step_m > 1e-9 and minor_step_m < step_m:
+            minor_tick = 0.0
+            while minor_tick <= ruler_end_s + 1e-9:
+                major_index = round(minor_tick / step_m)
+                if abs(minor_tick - major_index * step_m) > 1e-6:
+                    x = self._x_for_time(minor_tick)
+                    painter.setPen(QPen(QColor("#454d56"), 1))
+                    painter.drawLine(int(x), minor_tick_top, int(x), tick_bottom)
+                minor_tick += minor_step_m
+
         tick = 0.0
-        while tick <= self._projection.display_s_m + 1e-9:
-            x = self._x_for_s(tick)
+        while tick <= ruler_end_s + 1e-9:
+            x = self._x_for_time(tick)
+            painter.setPen(QPen(QColor("#68727d"), 1))
             painter.drawLine(int(x), tick_top, int(x), tick_bottom)
             label = _format_axis_label(tick, step_m, self._projection.axis_unit)
             label_width = metrics.horizontalAdvance(label)
-            painter.setPen(QColor("#9aa3ad"))
+            painter.setPen(QColor("#c1c9d1"))
             painter.drawText(int(x - label_width / 2), label_y, label)
-            painter.setPen(QPen(QColor("#3b4148"), 1))
             tick += step_m
 
     def _draw_row(
@@ -1981,8 +2011,8 @@ class TimelineDock(QFrame):
         self._constraint_add_armed = False
         self._constraint_create_key = str(RANGED_CONSTRAINT_KEYS[0])
         self._play_pause_btn: QPushButton
-        self._playback_label: QLabel
-        self._summary_label: QLabel
+        self._time_current_label: QLabel
+        self._time_total_label: QLabel
         self._zoom_label: QLabel
         self._zoom_slider: QSlider
         self._rail_scroll: QScrollArea
@@ -1995,7 +2025,7 @@ class TimelineDock(QFrame):
     def _zoom_value_from_slider(self, slider_value: int) -> int:
         clamped = max(ZOOM_SLIDER_MIN, min(ZOOM_SLIDER_MAX, int(slider_value)))
         alpha = (clamped - ZOOM_SLIDER_MIN) / max(1, ZOOM_SLIDER_MAX - ZOOM_SLIDER_MIN)
-        min_zoom = float(max(MIN_ZOOM_PX_PER_M, int(self._minimum_zoom_px_per_m)))
+        min_zoom = float(MIN_ZOOM_PX_PER_M)
         max_zoom = float(MAX_ZOOM_PX_PER_M)
         if max_zoom <= min_zoom:
             return int(round(min_zoom))
@@ -2003,7 +2033,7 @@ class TimelineDock(QFrame):
         return max(int(round(min_zoom)), min(MAX_ZOOM_PX_PER_M, int(round(zoom))))
 
     def _slider_value_from_zoom(self, zoom_value: float) -> int:
-        min_zoom = float(max(MIN_ZOOM_PX_PER_M, int(self._minimum_zoom_px_per_m)))
+        min_zoom = float(MIN_ZOOM_PX_PER_M)
         max_zoom = float(MAX_ZOOM_PX_PER_M)
         zoom = max(min_zoom, min(max_zoom, float(zoom_value)))
         if max_zoom <= min_zoom:
@@ -2029,15 +2059,6 @@ class TimelineDock(QFrame):
                 background: #191919;
                 border-bottom: 1px solid #2b2b2b;
             }
-            QLabel#timelineToolbarTitle {
-                color: #f0f0f0;
-                font-size: 13px;
-                font-weight: 600;
-            }
-            QLabel#timelineToolbarMeta {
-                color: #97a0aa;
-                font-size: 11px;
-            }
             QPushButton[timelineControl='true'] {
                 background: #272727;
                 color: #e9eef3;
@@ -2047,6 +2068,18 @@ class TimelineDock(QFrame):
             }
             QPushButton[timelineControl='true']:hover {
                 background: #313131;
+            }
+            QPushButton[timelineTransport='true'] {
+                background: transparent;
+                border: none;
+                border-radius: 0;
+                padding: 0;
+            }
+            QPushButton[timelineTransport='true']:hover {
+                background: #24282d;
+            }
+            QPushButton[timelineTransport='true']:disabled {
+                background: transparent;
             }
             QSlider::groove:horizontal {
                 height: 4px;
@@ -2060,9 +2093,18 @@ class TimelineDock(QFrame):
                 background: #d8dee6;
             }
             QLabel#timelineZoomLabel,
-            QLabel#timelinePlaybackLabel {
+            QLabel#timelineTimeValue,
+            QLabel#timelineTimeSeparator {
                 color: #bcc4cc;
                 font-size: 11px;
+            }
+            QLabel#timelineTimeValue {
+                color: #d3d9df;
+                font-size: 12px;
+            }
+            QLabel#timelineTimeSeparator {
+                color: #7f8892;
+                font-size: 12px;
             }
             QScrollArea {
                 border: none;
@@ -2081,50 +2123,77 @@ class TimelineDock(QFrame):
         toolbar_layout.setContentsMargins(10, 6, 10, 6)
         toolbar_layout.setSpacing(8)
 
-        title = QLabel("Timeline")
-        title.setObjectName("timelineToolbarTitle")
-        toolbar_layout.addWidget(title)
+        side_panel_width = 260
+        left_panel = QWidget()
+        left_panel.setFixedWidth(side_panel_width)
+        left_layout = QHBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
 
-        self._summary_label = QLabel("")
-        self._summary_label.setObjectName("timelineToolbarMeta")
-        self._summary_label.setWordWrap(False)
-        toolbar_layout.addWidget(self._summary_label, 1)
+        fixed_font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+        fixed_font.setPointSize(11)
 
-        self._playback_label = QLabel("Paused at 0.00 / 0.00 s")
-        self._playback_label.setObjectName("timelinePlaybackLabel")
-        toolbar_layout.addWidget(self._playback_label)
+        self._time_current_label = QLabel(_format_time_value(0.0))
+        self._time_current_label.setObjectName("timelineTimeValue")
+        self._time_current_label.setWordWrap(False)
+        self._time_current_label.setFont(fixed_font)
+        time_value_width = self._time_current_label.fontMetrics().horizontalAdvance("9999.99")
+        self._time_current_label.setFixedWidth(time_value_width + 2)
+        self._time_current_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        left_layout.addWidget(self._time_current_label)
 
-        self._play_pause_btn = QPushButton("Play")
-        self._play_pause_btn.setProperty("timelineControl", "true")
+        time_separator_label = QLabel(" / ")
+        time_separator_label.setObjectName("timelineTimeSeparator")
+        time_separator_label.setFont(fixed_font)
+        left_layout.addWidget(time_separator_label)
+
+        self._time_total_label = QLabel(f"{_format_time_value(0.0)} s")
+        self._time_total_label.setObjectName("timelineTimeValue")
+        self._time_total_label.setWordWrap(False)
+        self._time_total_label.setFont(fixed_font)
+        total_width = self._time_total_label.fontMetrics().horizontalAdvance("9999.99 s")
+        self._time_total_label.setFixedWidth(total_width + 2)
+        self._time_total_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        left_layout.addWidget(self._time_total_label)
+        left_layout.addStretch(1)
+        toolbar_layout.addWidget(left_panel)
+
+        toolbar_layout.addStretch(1)
+
+        self._play_pause_btn = QPushButton("")
+        self._play_pause_btn.setProperty("timelineTransport", "true")
+        self._play_pause_btn.setFixedSize(32, 32)
+        self._play_pause_btn.setIconSize(QSize(28, 28))
         self._play_pause_btn.setEnabled(False)
         self._play_pause_btn.clicked.connect(self._on_play_pause_toggled)
-        toolbar_layout.addWidget(self._play_pause_btn)
+        toolbar_layout.addWidget(self._play_pause_btn, 0, Qt.AlignCenter)
 
-        zoom_out_btn = QPushButton("-")
-        zoom_out_btn.setProperty("timelineControl", "true")
-        zoom_out_btn.clicked.connect(lambda: self._adjust_zoom(-10))
-        toolbar_layout.addWidget(zoom_out_btn)
+        toolbar_layout.addStretch(1)
 
-        zoom_in_btn = QPushButton("+")
-        zoom_in_btn.setProperty("timelineControl", "true")
-        zoom_in_btn.clicked.connect(lambda: self._adjust_zoom(10))
-        toolbar_layout.addWidget(zoom_in_btn)
+        right_panel = QWidget()
+        right_panel.setFixedWidth(side_panel_width)
+        right_layout = QHBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+        right_layout.addStretch(1)
 
         fit_btn = QPushButton("Fit")
         fit_btn.setProperty("timelineControl", "true")
         fit_btn.clicked.connect(self.fit_to_all)
-        toolbar_layout.addWidget(fit_btn)
+        right_layout.addWidget(fit_btn)
 
         self._zoom_slider = QSlider(Qt.Horizontal)
         self._zoom_slider.setRange(ZOOM_SLIDER_MIN, ZOOM_SLIDER_MAX)
         self._zoom_slider.setValue(self._slider_value_from_zoom(DEFAULT_ZOOM_PX_PER_M))
         self._zoom_slider.setFixedWidth(124)
         self._zoom_slider.valueChanged.connect(self._on_zoom_changed)
-        toolbar_layout.addWidget(self._zoom_slider)
+        right_layout.addWidget(self._zoom_slider)
 
         self._zoom_label = QLabel("")
         self._zoom_label.setObjectName("timelineZoomLabel")
-        toolbar_layout.addWidget(self._zoom_label)
+        self._zoom_label.setMinimumWidth(54)
+        right_layout.addWidget(self._zoom_label)
+        toolbar_layout.addWidget(right_panel)
 
         outer.addWidget(toolbar)
 
@@ -2194,6 +2263,7 @@ class TimelineDock(QFrame):
         )
 
         self._on_zoom_changed(self._zoom_slider.value())
+        self._update_play_pause_icon()
         self._apply_structure_add_armed(False)
         self._apply_trigger_add_armed(False)
         self._apply_constraint_add_armed(False)
@@ -2233,7 +2303,6 @@ class TimelineDock(QFrame):
         self._path = path or Path()
         self._config = dict(config or {})
         self._projection = _build_projection(self._path, self._config, use_sim_time=True)
-        self._summary_label.setText(self._projection.summary_text)
         self._rail_canvas.set_projection(self._projection)
         self._track_canvas.set_path_context(self._path, self._config)
         self._track_canvas.set_projection(self._projection)
@@ -2285,13 +2354,7 @@ class TimelineDock(QFrame):
         if watched is self._track_scroll.viewport():
             hbar = self._track_scroll.horizontalScrollBar()
             content_x = float(hbar.value()) + anchor_viewport_x
-            anchor_s_m = max(
-                0.0,
-                min(
-                    (content_x - TRACK_PADDING_X) / max(1.0, float(current_zoom)),
-                    float(self._projection.display_s_m),
-                ),
-            )
+            anchor_s_m = max(0.0, (content_x - TRACK_PADDING_X) / max(1.0, float(current_zoom)))
         self._set_zoom_px_per_m(
             target_zoom,
             anchor_viewport_x=anchor_viewport_x,
@@ -2309,16 +2372,16 @@ class TimelineDock(QFrame):
         self._total_time_s = max(0.0, float(total_time_s))
         self._is_playing = bool(is_playing and enabled)
         self._track_canvas.set_playhead(self._current_time_s, self._is_playing)
-        state_text = "Playing" if self._is_playing else "Paused"
-        if not enabled or self._total_time_s <= 1e-9:
-            state_text = "No simulation"
         self._play_pause_btn.setEnabled(bool(enabled and self._total_time_s > 1e-9))
-        self._play_pause_btn.setText("Pause" if self._is_playing else "Play")
-        self._playback_label.setText(
-            f"{state_text} at {self._current_time_s:.2f} / {self._total_time_s:.2f} s"
-        )
+        self._update_play_pause_icon()
+        self._time_current_label.setText(_format_time_value(self._current_time_s))
+        self._time_total_label.setText(f"{_format_time_value(self._total_time_s)} s")
         if self._is_playing:
             self._ensure_playhead_visible()
+
+    def _update_play_pause_icon(self) -> None:
+        self._play_pause_btn.setIcon(_transport_icon(self._is_playing))
+        self._play_pause_btn.setToolTip("Pause" if self._is_playing else "Play")
 
     def _on_zoom_changed(self, value: int) -> None:
         zoom_px_per_m = self._zoom_value_from_slider(value)
@@ -2331,17 +2394,11 @@ class TimelineDock(QFrame):
         anchor_viewport_x: float | None = None,
         anchor_s_m: float | None = None,
     ) -> None:
-        zoom_px_per_m = max(
-            int(self._minimum_zoom_px_per_m),
-            min(MAX_ZOOM_PX_PER_M, int(round(zoom_px_per_m))),
-        )
+        zoom_px_per_m = max(MIN_ZOOM_PX_PER_M, min(MAX_ZOOM_PX_PER_M, int(round(zoom_px_per_m))))
         hbar = self._track_scroll.horizontalScrollBar()
         if anchor_viewport_x is not None and anchor_s_m is not None:
             preserved_viewport_x = float(anchor_viewport_x)
-            preserved_content_s_m = max(
-                0.0,
-                min(float(anchor_s_m), float(self._projection.display_s_m)),
-            )
+            preserved_content_s_m = max(0.0, float(anchor_s_m))
         else:
             playhead_x_before = TRACK_PADDING_X + self._current_time_s * float(
                 self._track_canvas._zoom_px_per_m
@@ -2364,7 +2421,7 @@ class TimelineDock(QFrame):
         anchor_s_m: float | None = None,
     ) -> None:
         clamped_zoom = max(
-            int(self._minimum_zoom_px_per_m),
+            MIN_ZOOM_PX_PER_M,
             min(MAX_ZOOM_PX_PER_M, int(round(zoom_px_per_m))),
         )
         slider_value = self._slider_value_from_zoom(clamped_zoom)
@@ -2386,18 +2443,8 @@ class TimelineDock(QFrame):
         return max(MIN_ZOOM_PX_PER_M, min(MAX_ZOOM_PX_PER_M, zoom))
 
     def _update_minimum_zoom(self, *, enforce_current: bool) -> None:
-        new_min_zoom = self._fit_zoom_px_per_m()
-        if not enforce_current:
-            new_min_zoom = min(new_min_zoom, int(self._track_canvas._zoom_px_per_m))
-        if new_min_zoom == int(self._minimum_zoom_px_per_m):
-            if enforce_current and self._track_canvas._zoom_px_per_m < new_min_zoom:
-                self._set_zoom_px_per_m(new_min_zoom)
-            return
-        self._minimum_zoom_px_per_m = int(new_min_zoom)
-        current_zoom = max(int(self._track_canvas._zoom_px_per_m), int(self._minimum_zoom_px_per_m))
-        if enforce_current:
-            self._set_zoom_px_per_m(current_zoom)
-            return
+        self._minimum_zoom_px_per_m = MIN_ZOOM_PX_PER_M
+        current_zoom = max(MIN_ZOOM_PX_PER_M, int(self._track_canvas._zoom_px_per_m))
         slider_value = self._slider_value_from_zoom(current_zoom)
         self._zoom_slider.blockSignals(True)
         self._zoom_slider.setValue(slider_value)
@@ -2409,7 +2456,18 @@ class TimelineDock(QFrame):
         track_viewport_width = max(0, self._track_scroll.viewport().width())
         viewport_height = max(0, self._track_scroll.viewport().height())
         rail_height = max(1, viewport_height)
-        track_width = max(track_hint.width(), track_viewport_width)
+        path_width = int(
+            round(max(self._projection.display_s_m, 0.0) * self._track_canvas._zoom_px_per_m)
+        )
+        right_overscroll_width = max(
+            TIMELINE_RIGHT_OVERSCROLL_PX,
+            track_viewport_width * 2,
+        )
+        track_width = max(
+            track_hint.width(),
+            track_viewport_width,
+            TRACK_PADDING_X * 2 + path_width + right_overscroll_width,
+        )
         track_height = max(1, viewport_height)
 
         self._rail_canvas.resize(HEADER_WIDTH, rail_height)
@@ -2760,7 +2818,6 @@ def _build_projection(
 
     structure_markers: list[TimelineMarker] = []
     trigger_markers: list[TimelineMarker] = []
-    structure_count = 0
     rotation_count = 0
     event_count = 0
     translation_count = 0
@@ -2770,7 +2827,6 @@ def _build_projection(
         s_m = _element_global_s(index, element, path_elements, anchor_s_by_path_index)
         if isinstance(element, TranslationTarget):
             translation_count += 1
-            structure_count += 1
             structure_markers.append(
                 TimelineMarker(
                     s_m,
@@ -2784,7 +2840,6 @@ def _build_projection(
             )
         elif isinstance(element, Waypoint):
             waypoint_count += 1
-            structure_count += 1
             structure_markers.append(
                 TimelineMarker(
                     s_m,
@@ -2891,18 +2946,12 @@ def _build_projection(
     )
 
     display_s_m = max(total_s_m, 1.0 if structure_markers else 6.0)
-    summary_text = (
-        f"{structure_count} structure items, "
-        f"{rotation_count} rotation targets, "
-        f"{event_count} triggers, "
-        f"{len(getattr(path, 'ranged_constraints', []) or [])} ranged constraints"
-    )
     projection = TimelineProjection(
         total_s_m=total_s_m,
         display_s_m=display_s_m,
-        summary_text=summary_text,
+        summary_text="",
         rows=rows,
-        axis_label="Estimated Time",
+        axis_label="",
         axis_unit="s",
     )
     _map_projection_distance_to_time(
@@ -3572,12 +3621,59 @@ def _format_axis_label(value: float, step: float, unit: str) -> str:
     return f"{value:.0f}{suffix}"
 
 
+def _format_time_value(time_s: float) -> str:
+    return f"{max(0.0, float(time_s)):.2f}"
+
+
+def _format_timecode(current_time_s: float, total_time_s: float) -> str:
+    return f"{_format_time_value(current_time_s)} / {_format_time_value(total_time_s)} s"
+
+
+def _transport_icon(is_playing: bool) -> QIcon:
+    pixmap = QPixmap(32, 32)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    try:
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#ffffff"))
+        if is_playing:
+            painter.drawRoundedRect(QRectF(8.0, 6.0, 5.0, 20.0), 1.2, 1.2)
+            painter.drawRoundedRect(QRectF(19.0, 6.0, 5.0, 20.0), 1.2, 1.2)
+        else:
+            triangle = QPolygonF(
+                [
+                    _qpointf(10.0, 6.0),
+                    _qpointf(10.0, 26.0),
+                    _qpointf(25.0, 16.0),
+                ]
+            )
+            painter.drawPolygon(triangle)
+    finally:
+        painter.end()
+    return QIcon(pixmap)
+
+
 def _nice_ruler_step(px_per_m: float) -> float:
     target_px = 88.0
     for step in (0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0):
         if step * float(px_per_m) >= target_px:
             return step
     return 100.0
+
+
+def _minor_ruler_step(major_step: float) -> float:
+    major = max(0.0, float(major_step))
+    if major <= 0.0:
+        return 0.0
+    normalized = major
+    while normalized >= 10.0:
+        normalized /= 10.0
+    while normalized < 1.0:
+        normalized *= 10.0
+    if math.isclose(normalized, 1.0, rel_tol=1e-6, abs_tol=1e-6):
+        return major / 5.0
+    return major / 4.0
 
 
 def _qpointf(x: float, y: float):
