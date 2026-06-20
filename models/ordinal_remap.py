@@ -51,6 +51,28 @@ def _display_left_id_for_range(
     return domain[display_start_index]
 
 
+def _surviving_ordinals_for_range(
+    old_domain: List[int],
+    new_id_to_ordinal: dict[int, int],
+    start_ordinal: int,
+    end_ordinal: int,
+) -> List[int]:
+    start = int(start_ordinal)
+    end = int(end_ordinal)
+    if start > end:
+        start, end = end, start
+    old_range_ids = {
+        old_domain[ord_i - 1]
+        for ord_i in range(start, end + 1)
+        if 0 <= ord_i - 1 < len(old_domain)
+    }
+    return sorted(
+        new_id_to_ordinal[eid]
+        for eid in old_range_ids
+        if eid in new_id_to_ordinal
+    )
+
+
 def remap_ranged_constraints(path: Path, old_elements: List[PathElement]) -> None:
     """Update all RangedConstraint ordinals on `path` to reflect the
     current `path.path_elements` relative to the snapshot `old_elements`.
@@ -87,6 +109,12 @@ def remap_ranged_constraints(path: Path, old_elements: List[PathElement]) -> Non
         new_display_left = (
             new_id_to_ordinal.get(old_display_left_id) if old_display_left_id else None
         )
+        surviving_ordinals = _surviving_ordinals_for_range(
+            old_domain,
+            new_id_to_ordinal,
+            int(getattr(rc, "start_ordinal", 1)),
+            int(getattr(rc, "end_ordinal", 1)),
+        )
 
         if (
             new_display_left is not None
@@ -95,43 +123,26 @@ def remap_ranged_constraints(path: Path, old_elements: List[PathElement]) -> Non
             and old_end_id is not None
             and new_start is not None
         ):
-            if int(getattr(rc, "start_ordinal", 1)) <= 1:
+            start_ordinal = int(getattr(rc, "start_ordinal", 1))
+            if start_ordinal <= 1:
                 remapped_start = int(new_start if new_start is not None else new_display_left)
             else:
                 remapped_start = min(int(new_domain_size), int(new_display_left) + 1)
             remapped_end = int(new_end)
             if remapped_start > remapped_end:
                 remapped_start, remapped_end = remapped_end, remapped_start
+            if surviving_ordinals and (
+                min(surviving_ordinals) < remapped_start
+                or max(surviving_ordinals) > remapped_end
+            ):
+                remapped_start = surviving_ordinals[0]
+                remapped_end = surviving_ordinals[-1]
             rc.start_ordinal = remapped_start
             rc.end_ordinal = remapped_end
             surviving.append(rc)
-        elif new_start is not None and new_end is not None:
-            if new_start > new_end:
-                new_start, new_end = new_end, new_start
-            rc.start_ordinal = new_start
-            rc.end_ordinal = new_end
+        elif surviving_ordinals:
+            rc.start_ordinal = surviving_ordinals[0]
+            rc.end_ordinal = surviving_ordinals[-1]
             surviving.append(rc)
-        elif new_start is not None:
-            rc.start_ordinal = new_start
-            rc.end_ordinal = new_domain_size
-            surviving.append(rc)
-        elif new_end is not None:
-            rc.start_ordinal = 1
-            rc.end_ordinal = new_end
-            surviving.append(rc)
-        else:
-            old_range_ids = set()
-            for ord_i in range(rc.start_ordinal, rc.end_ordinal + 1):
-                if ord_i - 1 < len(old_domain):
-                    old_range_ids.add(old_domain[ord_i - 1])
-            surviving_ordinals = sorted(
-                new_id_to_ordinal[eid]
-                for eid in old_range_ids
-                if eid in new_id_to_ordinal
-            )
-            if surviving_ordinals:
-                rc.start_ordinal = surviving_ordinals[0]
-                rc.end_ordinal = surviving_ordinals[-1]
-                surviving.append(rc)
 
     path.ranged_constraints = surviving

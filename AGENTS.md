@@ -6,3 +6,4 @@ Notes
 - Carefully read and respect the following docs before beginning development: PYSIDE6_DEVELOPMENT.md, design.md, ui-spec.md, and tasks.md.
 - Validate every distinct function or feature with unit tests. Run tests using `uv run python3 -m pytest`
 - There is no `python`, there is `python3`
+- For original BLine-GUI upstream sync context, read and update `UPSTREAM_SYNC.md` every time upstream changes are reviewed or ported.

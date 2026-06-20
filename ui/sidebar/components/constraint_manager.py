@@ -3,6 +3,7 @@
 
 from typing import Dict, Optional, Tuple, Any, List
 import traceback
+import warnings
 from PySide6.QtCore import QObject, Signal, QTimer, QEvent
 from PySide6.QtWidgets import (
     QWidget,
@@ -71,6 +72,7 @@ class ConstraintManager(QObject):
         self._segment_spinboxes: Dict[str, QDoubleSpinBox] = {}
         self._segment_rc_lists: Dict[str, List[RangedConstraint]] = {}
         self._selected_segment_indices: Dict[str, int] = {}
+        self._label_filters: Dict[str, QObject] = {}
         self._popout_dialog = None
         self._boundary_drag_started: bool = False
 
@@ -223,6 +225,54 @@ class ConstraintManager(QObject):
                 container.setVisible(False)
             except Exception:
                 pass
+
+    def _dispose_dynamic_widget(self, widget: Optional[QWidget]) -> None:
+        """Hide, detach, and defer-delete a rebuilt row widget."""
+        if widget is None:
+            return
+        try:
+            widget.hide()
+        except Exception:
+            pass
+        try:
+            parent = widget.parentWidget()
+            if parent is not None and parent.layout() is not None:
+                parent.layout().removeWidget(widget)
+        except Exception:
+            pass
+        try:
+            widget.setParent(None)
+        except Exception:
+            pass
+        try:
+            widget.deleteLater()
+        except Exception:
+            pass
+
+    def _clear_dynamic_widgets_for_key(self, key: str, container: Optional[QWidget]) -> None:
+        """Remove rebuilt SegmentBar/controls widgets while preserving the reusable spinbox."""
+        if container is None:
+            return
+        layout = container.layout()
+        if not isinstance(layout, QVBoxLayout):
+            return
+
+        spinbox = self._segment_spinboxes.get(key)
+        if spinbox is not None:
+            try:
+                spinbox.hide()
+            except Exception:
+                pass
+            try:
+                spinbox.setParent(container)
+            except Exception:
+                pass
+
+        while layout.count() > 2:
+            item = layout.takeAt(2)
+            widget = item.widget()
+            if widget is not None:
+                self._dispose_dynamic_widget(widget)
 
     def update_constraint_value(self, key: str, value: float):
         """Update the value of a constraint."""
@@ -384,14 +434,7 @@ class ConstraintManager(QObject):
 
         # Clear existing dynamically added widgets (all after the first two: label and base spin_row)
         # We'll rebuild to reflect model state
-        while vbox.count() > 2:
-            item = vbox.itemAt(2)
-            w = item.widget()
-            if w is not None:
-                vbox.removeWidget(w)
-                w.deleteLater()
-            else:
-                vbox.removeItem(item)
+        self._clear_dynamic_widgets_for_key(key, field_container)
 
         # Sanitize any invalid ordinals without repositioning existing ranges
         for rc in ranged_list:
@@ -467,15 +510,18 @@ class ConstraintManager(QObject):
         # Reparent spinbox into controls row
         spinbox.setParent(controls_row)
         controls_layout.addWidget(spinbox)
+        spinbox.show()
         self._segment_spinboxes[key] = spinbox
 
         # Disconnect any previous valueChanged handlers (from prior rebuilds or
         # the property editor) to avoid duplicate connections that create
         # multiple undo entries per change.
-        try:
-            spinbox.valueChanged.disconnect()
-        except (TypeError, RuntimeError):
-            pass
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            try:
+                spinbox.valueChanged.disconnect()
+            except (TypeError, RuntimeError):
+                pass
         # Connect spinbox value changes to update selected segment
         spinbox.valueChanged.connect(lambda v, k=key: self._on_segment_spinbox_changed(k, v))
 
@@ -563,10 +609,15 @@ class ConstraintManager(QObject):
                 self._active_preview_key = key
                 self.constraintRangePreviewRequested.emit(key, rc.start_ordinal, rc.end_ordinal)
 
+        old_filter = self._label_filters.get(key)
+        if old_filter is not None:
+            try:
+                label_widget.removeEventFilter(old_filter)
+            except Exception:
+                pass
+
         label_filter = LabelClickFilter(_show_first_preview)
         label_widget.installEventFilter(label_filter)
-        if not hasattr(self, "_label_filters"):
-            self._label_filters = {}
         self._label_filters[key] = label_filter
 
         # Auto-select first segment (no preview — bar creation is programmatic)
@@ -815,22 +866,20 @@ class ConstraintManager(QObject):
 
     def clear_segment_bars(self):
         """Remove all segment bars and their state."""
-        for key, bar in self._segment_bars.items():
+        for key, container in list(self._constraint_field_containers.items()):
             try:
-                bar.deleteLater()
+                self._clear_dynamic_widgets_for_key(key, container)
+            except Exception:
+                pass  # widget may be destroyed
+            try:
+                if container is not None:
+                    container.setVisible(False)
             except Exception:
                 pass  # widget may be destroyed
         self._segment_bars.clear()
         self._segment_spinboxes.clear()
         self._segment_rc_lists.clear()
         self._selected_segment_indices.clear()
-        # Also hide any encompassing containers so background widgets don't persist
-        for _key, container in list(self._constraint_field_containers.items()):
-            try:
-                if container is not None:
-                    container.setVisible(False)
-            except Exception:
-                pass  # widget may be destroyed
 
     # ------------------------------------------------------------------
     # Popout dialog

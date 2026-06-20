@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from models.path_model import Path, TranslationTarget
+from PySide6.QtWidgets import QDoubleSpinBox, QFormLayout, QLabel, QHBoxLayout, QWidget
+
+from models.path_model import Path, RangedConstraint, TranslationTarget
 from ui.sidebar.components.constraint_manager import ConstraintManager
+from ui.sidebar.widgets.segment_bar import SegmentBar
 
 
 class _ProjectManagerStub:
@@ -35,3 +38,40 @@ def test_gap_double_click_uses_project_manager_default_value(qt_app):
 
     assert matching
     assert matching[-1].value == expected
+
+
+def test_rebuilding_segment_bar_replaces_dynamic_widgets_without_duplicates(qt_app):
+    key = "max_velocity_meters_per_sec"
+    path = Path(
+        path_elements=[TranslationTarget(), TranslationTarget(), TranslationTarget()],
+        ranged_constraints=[
+            RangedConstraint(key=key, value=2.0, start_ordinal=1, end_ordinal=1),
+            RangedConstraint(key=key, value=3.0, start_ordinal=2, end_ordinal=3),
+        ],
+    )
+    manager = ConstraintManager()
+    manager.set_path(path)
+
+    parent = QWidget()
+    layout = QFormLayout(parent)
+    label = QLabel("Velocity")
+    spin_row = QWidget()
+    spin_row.setLayout(QHBoxLayout())
+    control = QDoubleSpinBox()
+    spin_row.layout().addWidget(control)
+    layout.addRow(label, spin_row)
+    parent.show()
+
+    manager.create_segment_bar_for_key(key, control, spin_row, label, layout)
+    qt_app.processEvents()
+    assert len(parent.findChildren(SegmentBar)) == 1
+    assert manager._segment_spinboxes[key].isVisible()
+
+    manager.create_segment_bar_for_key(key, control, spin_row, label, layout)
+    qt_app.processEvents()
+
+    assert len(parent.findChildren(SegmentBar)) == 1
+    assert manager._segment_spinboxes[key] is control
+    assert control.isVisible()
+
+    parent.close()
