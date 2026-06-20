@@ -1,4 +1,4 @@
-"""Path simulation engine for BLine-GUI.
+"""Path simulation engine for BUI.
 
 This module provides an idealistic kinematic simulation of path following. It is
 intended for visualization and initial path validation in the GUI, NOT as a

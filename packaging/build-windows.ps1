@@ -69,13 +69,13 @@ Write-Host "Building executable with PyInstaller..." -ForegroundColor Yellow
 Set-Location $ScriptDir
 
 # Create updated spec file with icon
-$SpecContent = Get-Content "bline.spec" -Raw
+$SpecContent = Get-Content "bui.spec" -Raw
 if (Test-Path $IcoPath) {
     $SpecContent = $SpecContent -replace "icon=str\(assets_dir / 'rebel_logo\.png'\).*", "icon='$($IcoPath.Replace('\', '\\'))',"
-    Set-Content -Path "bline.spec" -Value $SpecContent
+    Set-Content -Path "bui.spec" -Value $SpecContent
 }
 
-pyinstaller --clean --noconfirm bline.spec
+pyinstaller --clean --noconfirm bui.spec
 
 # Check if build succeeded
 $ExePath = Join-Path $DistDir "BUI\BUI.exe"

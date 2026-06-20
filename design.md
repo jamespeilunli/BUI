@@ -6,6 +6,8 @@ This document defines the desired user experience for a redesigned path editing 
 
 This document intentionally focuses on what the user should be able to do and how the interface should feel. It does not describe implementation, class structure, widget choices, or technical migration steps.
 
+This repo, named BUI, is a fork of the original BLine-GUI repo.
+
 ## Product Goal
 
 Users should be able to build, inspect, and refine robot paths with the same confidence and speed that video editors use to shape a timeline. The redesigned interface should make sequence, timing, ranges, and cause-and-effect relationships obvious at a glance.

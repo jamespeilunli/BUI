@@ -91,7 +91,7 @@ chmod +x "${APPDIR}/AppRun"
 
 # Copy desktop file
 echo "Installing desktop file..."
-cp "${SCRIPT_DIR}/bline.desktop" "${APPDIR}/"
+cp "${SCRIPT_DIR}/bui.desktop" "${APPDIR}/"
 
 # Copy icon
 echo "Installing icon..."

@@ -65,7 +65,7 @@ cd "$SCRIPT_DIR"
 pyinstaller --clean --noconfirm \
     --distpath "$DIST_DIR" \
     --workpath "${BUILD_DIR}/pyinstaller" \
-    bline-macos.spec
+    bui-macos.spec
 
 deactivate
 
