@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 
+import pytest
 from PySide6.QtWidgets import QDialog
 
 from models.path_model import (
@@ -19,7 +20,7 @@ from utils.project_manager import ProjectManager
 
 
 class DummySettings:
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         self._store: dict[str, str] = {}
 
     def setValue(self, key: str, value):
@@ -30,6 +31,11 @@ class DummySettings:
 
     def remove(self, key: str):
         self._store.pop(key, None)
+
+
+@pytest.fixture(autouse=True)
+def isolated_project_settings(monkeypatch):
+    monkeypatch.setattr("utils.project_manager.QSettings", DummySettings)
 
 
 def _new_window() -> MainWindow:
