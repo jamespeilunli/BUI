@@ -91,3 +91,26 @@ def test_project_manager_saves_and_loads_paths(tmp_path: Path):
     loaded = pm.load_path("unit_test.json")
     assert loaded is not None
     assert len(loaded.path_elements) == 1
+
+
+def test_project_manager_persists_simulated_path_display_mode():
+    pm = ProjectManager()
+    pm.settings = DummySettings()
+
+    assert pm.simulated_path_display_mode() == "to_current_time"
+
+    pm.set_simulated_path_display_mode("complete")
+
+    assert pm.simulated_path_display_mode() == "complete"
+    assert (
+        pm.settings.value(ProjectManager.KEY_SIMULATED_PATH_DISPLAY_MODE)
+        == "complete"
+    )
+
+    pm.set_simulated_path_display_mode("unsupported")
+
+    assert pm.simulated_path_display_mode() == "complete"
+
+    pm.settings.setValue(ProjectManager.KEY_SIMULATED_PATH_DISPLAY_MODE, "unsupported")
+
+    assert pm.simulated_path_display_mode() == "to_current_time"

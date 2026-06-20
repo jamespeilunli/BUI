@@ -14,6 +14,21 @@ from models.path_model import (
 )
 from ui.main_window.window import MainWindow
 from ui.timeline.placeholder import StructurePlacement, TriggerPlacement
+from utils.project_manager import ProjectManager
+
+
+class DummySettings:
+    def __init__(self):
+        self._store: dict[str, str] = {}
+
+    def setValue(self, key: str, value):
+        self._store[key] = value
+
+    def value(self, key: str, type=None):
+        return self._store.get(key)
+
+    def remove(self, key: str):
+        self._store.pop(key, None)
 
 
 def _new_window() -> MainWindow:
@@ -59,6 +74,35 @@ def test_view_menu_simulated_path_actions_update_canvas_mode(qt_app):
 
         assert window.canvas.simulated_path_display_mode() == "to_current_time"
         assert window.action_simulated_path_to_current_time.isChecked()
+    finally:
+        window.close()
+
+
+def test_simulated_path_mode_persists_as_application_setting(qt_app):
+    window = _new_window()
+    try:
+        window.project_manager.settings = DummySettings()
+
+        window._apply_simulated_path_display_mode("complete", persist=True)
+
+        assert (
+            window.project_manager.settings.value(
+                ProjectManager.KEY_SIMULATED_PATH_DISPLAY_MODE,
+                type=str,
+            )
+            == "complete"
+        )
+
+        window._apply_simulated_path_display_mode("hidden", persist=False)
+
+        assert (
+            window.project_manager.settings.value(
+                ProjectManager.KEY_SIMULATED_PATH_DISPLAY_MODE,
+                type=str,
+            )
+            == "complete"
+        )
+        assert window.canvas.simulated_path_display_mode() == "hidden"
     finally:
         window.close()
 

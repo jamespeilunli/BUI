@@ -398,6 +398,9 @@ class ProjectManager:
     KEY_LAST_PROJECT_DIR = "project/last_project_dir"
     KEY_LAST_PATH_FILE = "project/last_path_file"
     KEY_RECENT_PROJECTS = "project/recent_projects"
+    KEY_SIMULATED_PATH_DISPLAY_MODE = "view/simulated_path_display_mode"
+    SIMULATED_PATH_DISPLAY_MODES = {"hidden", "to_current_time", "complete"}
+    DEFAULT_SIMULATED_PATH_DISPLAY_MODE = "to_current_time"
 
     def __init__(self):
         self.settings = QSettings(self.SETTINGS_ORG, self.SETTINGS_APP)
@@ -527,6 +530,23 @@ class ProjectManager:
         # Store as JSON string to be robust
         try:
             self.settings.setValue(self.KEY_RECENT_PROJECTS, json.dumps(items))
+        except Exception:
+            pass
+
+    # --------------- Application view preferences ---------------
+    def simulated_path_display_mode(self) -> str:
+        raw = self.settings.value(self.KEY_SIMULATED_PATH_DISPLAY_MODE, type=str)
+        mode = str(raw or "").strip().lower()
+        if mode in self.SIMULATED_PATH_DISPLAY_MODES:
+            return mode
+        return self.DEFAULT_SIMULATED_PATH_DISPLAY_MODE
+
+    def set_simulated_path_display_mode(self, mode: str) -> None:
+        normalized = str(mode or "").strip().lower()
+        if normalized not in self.SIMULATED_PATH_DISPLAY_MODES:
+            return
+        try:
+            self.settings.setValue(self.KEY_SIMULATED_PATH_DISPLAY_MODE, normalized)
         except Exception:
             pass
 

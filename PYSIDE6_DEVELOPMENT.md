@@ -101,7 +101,59 @@ Typical mutation flow from the canvas:
 
 This separation is deliberate. Preserve it.
 
-## 4. Why the Code Uses Qt Widgets, Not Designer/QML
+## 4. Persistent State Boundaries
+
+The app has three different persistence layers. Keep their responsibilities separate.
+
+### 4.1 App-local `QSettings`
+
+Use `QSettings` for machine-local user preferences and launch continuity. These values are not
+part of a robot path, should not be committed to project files, and should not affect BLine Lib
+compatibility.
+
+Current examples:
+
+- last selected project directory
+- last opened path filename
+- recent project list
+- view preferences such as the simulated path display mode
+
+`QSettings` values belong behind `ProjectManager` helpers when practical, rather than being
+scattered through UI classes as raw key strings.
+
+### 4.2 Project `config.json`
+
+Use project config for shared project-level defaults and robot/editor settings that influence
+simulation, authoring defaults, or path interpretation.
+
+Current examples:
+
+- robot dimensions
+- protrusion settings and event-key mappings
+- default kinematic constraints
+- default handoff radius and end tolerances
+
+Changing `config.json` is a project data change. It should go through the existing config save,
+undo/redo, refresh, and autosave expectations where applicable.
+
+### 4.3 Path JSON files
+
+Use path JSON files only for the data model that represents a BLine path and must stay compatible
+with the backend/library expectations.
+
+Current examples:
+
+- translation targets, waypoints, rotation targets, and event triggers
+- flat path constraints
+- ranged constraints
+
+Autosave writes the current path through this layer. Undo/redo is in-memory snapshot state and is
+not persisted across app restarts.
+
+Rule of thumb: view state belongs in `QSettings`; robot/project defaults belong in `config.json`;
+path semantics belong in `paths/*.json`.
+
+## 5. Why the Code Uses Qt Widgets, Not Designer/QML
 
 Everything here is hand-authored Python UI code. That is a good fit for this app because:
 
@@ -113,9 +165,9 @@ Everything here is hand-authored Python UI code. That is a good fit for this app
 There are no `.ui` files and no QML layer. If you add new UI, follow the existing Python
 construction patterns unless there is a compelling reason not to.
 
-## 5. Repo-Specific PySide6 Patterns
+## 6. Repo-Specific PySide6 Patterns
 
-### 5.1 `ui.qt_compat` exists for typing friction
+### 6.1 `ui.qt_compat` exists for typing friction
 
 Qt enums and flags are awkward under PySide6 stubs and mypy. This repo centralizes a set of
 `cast(Any, ...)` shims in `ui/qt_compat.py`.
@@ -135,7 +187,7 @@ This codebase also uses `# mypy: ignore-errors` in most UI files. That is not id
 the current local convention. Do not waste time fighting PySide6 stub edge cases in UI modules
 unless there is a real bug.
 
-### 5.2 `QTimer.singleShot(...)` is a core tool, not a workaround of last resort
+### 6.2 `QTimer.singleShot(...)` is a core tool, not a workaround of last resort
 
 This repo uses deferred work constantly. Common reasons:
 
@@ -154,7 +206,7 @@ Patterns used here:
 When you see a timer in this repo, assume there is a real sequencing issue behind it. Do not
 remove or collapse those deferrals casually.
 
-### 5.3 Signal wiring is explicit and dense
+### 6.3 Signal wiring is explicit and dense
 
 `MainWindow.__init__()` is the integration hub. It wires:
 
@@ -171,7 +223,7 @@ Before changing cross-component behavior, inspect the existing signal graph in
 `ui/main_window/window.py`. Problems here usually come from signal ordering, duplicate emission,
 or feedback loops.
 
-### 5.4 Selection churn is a real issue
+### 6.4 Selection churn is a real issue
 
 The code has explicit guard logic to avoid redundant select-clear-select cycles. Examples:
 
@@ -182,7 +234,7 @@ The code has explicit guard logic to avoid redundant select-clear-select cycles.
 If you change selection behavior, assume visual flicker and scroll jumps will appear unless you
 preserve these guards.
 
-## 6. Main Window Responsibilities
+## 7. Main Window Responsibilities
 
 `MainWindow` is not just a container. It owns several important coordination concerns:
 
@@ -206,7 +258,7 @@ Important local conventions:
 Do not move state mutation into random widget code when it should remain centralized in
 `MainWindow`.
 
-## 7. Sidebar Architecture
+## 8. Sidebar Architecture
 
 The sidebar is a widget-based editor composed from smaller managers:
 
@@ -237,7 +289,7 @@ That means:
 `ConstraintManager` explicitly disconnects and reconnects some signals during rebuilds to avoid
 duplicate handlers. Follow that pattern if you add more dynamic controls.
 
-## 8. Canvas Architecture: This Is a Graphics View App
+## 9. Canvas Architecture: This Is a Graphics View App
 
 The most specialized PySide6 knowledge you need for this repo is the Graphics View framework.
 
@@ -263,7 +315,7 @@ Custom item types live in `ui/canvas/items/elements.py`:
 
 Simulation visuals live in `ui/canvas/items/sim.py`.
 
-### 8.1 Coordinate systems
+### 9.1 Coordinate systems
 
 There are two coordinate spaces:
 
@@ -280,7 +332,7 @@ Do not mix raw scene positions into model code or vice versa.
 For the 2026 field, the view applies `FIELD_OFFSET_M`, and Y is inverted relative to normal
 screen coordinates. If a visual looks mirrored or shifted, check the conversion path first.
 
-### 8.2 Interactive items are constrained in `itemChange()`
+### 9.2 Interactive items are constrained in `itemChange()`
 
 Canvas items use `QGraphicsItem.ItemPositionChange` and `ItemPositionHasChanged` to:
 
@@ -298,7 +350,7 @@ If you add a new draggable canvas item, decide:
 - what constraints should run in `itemChange()`
 - what signals it should trigger during live interaction and on release
 
-### 8.3 Selection and paint are custom
+### 9.3 Selection and paint are custom
 
 Selected items are not left to default Qt visuals. The canvas provides:
 
@@ -313,7 +365,7 @@ If you change selection visuals, inspect:
 - `_apply_selection_layering()`
 - custom `paint()` methods in the item classes
 
-### 8.4 Panning and zooming are custom too
+### 9.4 Panning and zooming are custom too
 
 `CanvasView` overrides:
 
@@ -328,7 +380,7 @@ If a change affects viewport behavior, test:
 - panning on background vs interactive items
 - overlay positioning during scroll/zoom/resize
 
-## 9. Undo/Redo Contract
+## 10. Undo/Redo Contract
 
 Undo/redo is snapshot-based, not diff-based.
 
@@ -350,7 +402,7 @@ Rules for safe changes:
 
 Do not build new features that depend on object identity surviving undo.
 
-## 10. Autosave and Persistence
+## 11. Autosave and Persistence
 
 Persistence is split between:
 
@@ -374,7 +426,7 @@ If you add UI that changes persistent data, decide whether it belongs in:
 
 Do not blur those layers.
 
-## 11. Styling in This Repo
+## 12. Styling in This Repo
 
 There are two styling layers:
 
@@ -403,7 +455,7 @@ Qt stylesheet caveats matter here:
 If you are trying to make a widget look right and it keeps fighting layout/painting,
 inspect size policies and custom paint logic before adding more stylesheet overrides.
 
-## 12. Resources and Assets
+## 13. Resources and Assets
 
 Qt resources are compiled into `assets_rc.py` and loaded once through `ui/resources/__init__.py`.
 
@@ -421,9 +473,9 @@ Important rules:
 
 Do not replace working `:/assets/...` usage with raw filesystem paths inside the app UI.
 
-## 13. Common Implementation Recipes
+## 14. Common Implementation Recipes
 
-### 13.1 Add a new property to an element
+### 14.1 Add a new property to an element
 
 Typical steps:
 
@@ -436,7 +488,7 @@ Typical steps:
 7. Update simulation if behavior changes.
 8. Verify undo/redo and autosave.
 
-### 13.2 Add a new sidebar-only control
+### 14.2 Add a new sidebar-only control
 
 Typical steps:
 
@@ -448,7 +500,7 @@ Typical steps:
    flow.
 5. If it should survive rebuilds, make sure refresh code restores its state.
 
-### 13.3 Add a new canvas item type
+### 14.3 Add a new canvas item type
 
 Typical steps:
 
@@ -461,7 +513,7 @@ Typical steps:
 7. Update sidebar editing support.
 8. Test drag, rotate, selection, undo, redo, autosave, and simulation rebuilds.
 
-### 13.4 Add a new dialog
+### 14.4 Add a new dialog
 
 Use the `ConfigDialog` pattern:
 
@@ -473,9 +525,9 @@ Use the `ConfigDialog` pattern:
 - if live updates are needed, pass a callback instead of letting the dialog reach deeply into
   unrelated objects
 
-## 14. Common Pitfalls in This Codebase
+## 15. Common Pitfalls in This Codebase
 
-### 14.1 Re-entrancy during rebuilds
+### 15.1 Re-entrancy during rebuilds
 
 Symptoms:
 
@@ -491,27 +543,27 @@ Mitigations used here:
 - deferred selection and refresh
 - explicit disconnect/reconnect in rebuild paths
 
-### 14.2 Stale object references after undo
+### 15.2 Stale object references after undo
 
 If you cache model objects across undo, expect bugs. Cache keys or indexes when possible, and
 rebuild references after command execution.
 
-### 14.3 Scroll position loss
+### 15.3 Scroll position loss
 
 Qt will happily auto-scroll list widgets and scroll areas during selection or relayout.
 This repo works around that with explicit scroll capture and restore. Preserve those patterns.
 
-### 14.4 Duplicate signal connections
+### 15.4 Duplicate signal connections
 
 Dynamic rebuilds make it easy to connect the same slot repeatedly. If a widget is reused across
 rebuilds, disconnect old handlers before reconnecting.
 
-### 14.5 Mixing model mutation into paint or selection code
+### 15.5 Mixing model mutation into paint or selection code
 
 Painting should paint. Selection handlers should select. Keep model mutation in explicit edit
 paths, not in passive rendering code.
 
-### 14.6 Assuming Qt layout timing is synchronous
+### 15.6 Assuming Qt layout timing is synchronous
 
 Many layout-dependent operations need to happen later:
 
@@ -522,7 +574,7 @@ Many layout-dependent operations need to happen later:
 
 When geometry-dependent code acts flaky, test a deferred invocation before redesigning the logic.
 
-## 15. Verification Checklist for UI Changes
+## 16. Verification Checklist for UI Changes
 
 Any non-trivial UI change should be checked against this list:
 
@@ -549,7 +601,7 @@ For canvas changes specifically:
 - run simulation playback
 - test with longer paths and multiple constraints
 
-## 16. Recommended External PySide6 Topics
+## 17. Recommended External PySide6 Topics
 
 For engineers already comfortable with desktop UI work, the most relevant Qt/PySide6 topics for
 this repo are:
@@ -569,7 +621,7 @@ this repo are:
 The official Qt for Python docs are the right reference source. For this repo, prioritize
 Widgets and Graphics View over QML.
 
-## 17. Practical Guidance for Future Contributors
+## 18. Practical Guidance for Future Contributors
 
 If you are new to this repo and need to make UI changes quickly, follow this order:
 
@@ -596,4 +648,3 @@ The fastest way to succeed is to:
 - rebuild views from model state when in doubt
 - respect the existing deferred-update patterns
 - test interactions, not just appearance
-

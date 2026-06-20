@@ -130,6 +130,10 @@ class MainWindow(WindowEventMixin, QMainWindow):
         self.canvas.playbackStateChanged.connect(self.timeline.set_playback_state)
         self.timeline.scrubRequested.connect(self.canvas.set_playback_time)
         self.timeline.playPauseToggled.connect(self.canvas.toggle_play_pause)
+        self._apply_simulated_path_display_mode(
+            self.project_manager.simulated_path_display_mode(),
+            persist=False,
+        )
         # Build initial simulation
         self.canvas.request_simulation_rebuild()
 
@@ -390,6 +394,9 @@ class MainWindow(WindowEventMixin, QMainWindow):
         return {}
 
     def _action_set_simulated_path_display_mode(self, mode: str) -> None:
+        self._apply_simulated_path_display_mode(mode, persist=True)
+
+    def _apply_simulated_path_display_mode(self, mode: str, *, persist: bool) -> None:
         normalized = str(mode or "").strip().lower()
         if normalized not in {"hidden", "to_current_time", "complete"}:
             return
@@ -397,6 +404,11 @@ class MainWindow(WindowEventMixin, QMainWindow):
             self.canvas.set_simulated_path_display_mode(normalized)
         except Exception:
             pass
+        if persist:
+            try:
+                self.project_manager.set_simulated_path_display_mode(normalized)
+            except Exception:
+                pass
         action_by_mode = {
             "hidden": getattr(self, "action_simulated_path_hidden", None),
             "to_current_time": getattr(self, "action_simulated_path_to_current_time", None),
