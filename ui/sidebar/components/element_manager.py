@@ -4,7 +4,14 @@
 import math
 from typing import Any, Dict, List, Optional, Tuple
 from PySide6.QtCore import QObject, Signal
-from models.path_model import Path, PathElement, TranslationTarget, RotationTarget, Waypoint, EventTrigger
+from models.path_model import (
+    Path,
+    PathElement,
+    TranslationTarget,
+    RotationTarget,
+    Waypoint,
+    EventTrigger,
+)
 from ui.canvas import (
     FIELD_LENGTH_METERS,
     FIELD_WIDTH_METERS,
@@ -289,9 +296,9 @@ class ElementManager(QObject):
             return False
 
         # Prevent creating rotation at ends unless the current element already is rotation
-        if (
-            new_type in (ElementType.ROTATION, ElementType.EVENT_TRIGGER)
-            and prev_type not in (ElementType.ROTATION, ElementType.EVENT_TRIGGER)
+        if new_type in (ElementType.ROTATION, ElementType.EVENT_TRIGGER) and prev_type not in (
+            ElementType.ROTATION,
+            ElementType.EVENT_TRIGGER,
         ):
             if idx == 0 or idx == len(self.path.path_elements) - 1:
                 return False
@@ -562,7 +569,9 @@ class ElementManager(QObject):
             )
         elif new_type == ElementType.EVENT_TRIGGER:
             return EventTrigger(
-                t_ratio=rotation_values["t_ratio"] if rotation_values["t_ratio"] is not None else 0.5,
+                t_ratio=rotation_values["t_ratio"]
+                if rotation_values["t_ratio"] is not None
+                else 0.5,
                 lib_key="",
             )
 

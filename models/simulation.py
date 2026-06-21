@@ -723,14 +723,10 @@ def simulate_path(
             path, "max_acceleration_meters_per_sec2", next_anchor_ord_1b
         )
         max_v = (
-            min(float(base_max_v), float(max_v_eff))
-            if max_v_eff is not None
-            else float(base_max_v)
+            min(float(base_max_v), float(max_v_eff)) if max_v_eff is not None else float(base_max_v)
         )
         max_a = (
-            min(float(base_max_a), float(max_a_eff))
-            if max_a_eff is not None
-            else float(base_max_a)
+            min(float(base_max_a), float(max_a_eff)) if max_a_eff is not None else float(base_max_a)
         )
 
         # Resolve dynamic rotation constraints based on the next rotation event ahead of current s

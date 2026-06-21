@@ -180,9 +180,7 @@ def test_timeline_canvas_geometry_keeps_header_and_track_alignment(qt_app, mixed
         ]
         constraints = _constraint_row_for_key(dock._projection, "max_velocity_meters_per_sec")
         row_top, row_height = next(
-            row_layout
-            for row, row_layout in zip(rows, layout)
-            if row is constraints
+            row_layout for row, row_layout in zip(rows, layout) if row is constraints
         )
         track_rect = dock._track_canvas._track_rect_for_row(row_top, row_height)
         lane_count, _gap, lane_height, lanes_top = dock._track_canvas._lane_metrics(

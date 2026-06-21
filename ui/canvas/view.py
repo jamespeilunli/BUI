@@ -194,7 +194,9 @@ class CanvasView(QGraphicsView):
         # Constraint popout sync state
         self._constraint_popout_active: bool = False
         self._constraint_highlight_indices: List[int] = []  # global indices to highlight
-        self._constraint_highlight_saved_styles: Dict[int, Tuple[QPen, QBrush]] = {}  # saved for restoration
+        self._constraint_highlight_saved_styles: Dict[
+            int, Tuple[QPen, QBrush]
+        ] = {}  # saved for restoration
 
     # ---------------- Field Background ----------------
     def _load_field_background(self, image_path: str):
@@ -824,7 +826,7 @@ class CanvasView(QGraphicsView):
         if abs(steps) <= 1e-9:
             return False
         anchor_scene_pos = self._scene_pos_from_view(anchor_viewport_pos)
-        target_zoom = float(self._zoom_factor) * (self._WHEEL_ZOOM_BASE**float(steps))
+        target_zoom = float(self._zoom_factor) * (self._WHEEL_ZOOM_BASE ** float(steps))
         return self._set_zoom_factor(
             target_zoom,
             anchor_viewport_pos=anchor_viewport_pos,
@@ -852,7 +854,9 @@ class CanvasView(QGraphicsView):
                     self._base_view_scale = self._fit_scale_for_viewport()
                     self._update_navigation_scene_rect()
                     self._apply_view_transform(
-                        preserve_center=preserve_center if preserve_center is not None else rect.center()
+                        preserve_center=preserve_center
+                        if preserve_center is not None
+                        else rect.center()
                     )
                 except Exception:
                     pass
@@ -1849,7 +1853,9 @@ class CanvasView(QGraphicsView):
                     )
                     x = float(x0) + alpha * (float(x1) - float(x0))
                     y = float(y0) + alpha * (float(y1) - float(y0))
-                    dth = math.atan2(math.sin(float(th1) - float(th0)), math.cos(float(th1) - float(th0)))
+                    dth = math.atan2(
+                        math.sin(float(th1) - float(th0)), math.cos(float(th1) - float(th0))
+                    )
                     th = float(th0) + alpha * dth
                     key = None
             self._set_sim_robot_pose(x, y, th)

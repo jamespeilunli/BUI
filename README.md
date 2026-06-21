@@ -1,247 +1,106 @@
-# BLine-GUI
+# BUI
 
-**BLine** is an open-source path generation and tracking suite designed for **holonomic drivetrains** (swerve, mecanum, etc.) made by students for students. It's built around simplicity and performance in time-constrained environments where quick iteration and rapid empirical testing prove advantageous.
+BUI is a timeline-based fork of [BLine-GUI](https://github.com/edanliahovetsky/BLine-GUI), the desktop editor for creating BLine autonomous paths for holonomic FRC drivetrains.
 
-📚 **[Documentation](https://edanliahovetsky.github.io/BLine-Docs/)** — full guides, tutorials, and reference.
+BUI is designed to be fully compatible with the files [BLine-Lib](https://github.com/edanliahovetsky/BLine-Lib) expects. You can switch to BUI from BLine-GUI immediately for any BLine codebase.
+
+The field canvas remains the geometric editor, the right sidebar remains the detailed inspector, and the bottom timeline is the main surface for sequence, timing, event triggers, playback, scrubbing, and ranged constraints.
+
+📚 **[Original BLine Documentation](https://edanliahovetsky.github.io/BLine-Docs/)** — path concepts, robot-side usage, and reference.
 
 ☕ **[BLine-Lib](https://github.com/edanliahovetsky/BLine-Lib)** — the BLine Java library.
-
-💬 **[Chief Delphi Thread](https://www.chiefdelphi.com/t/introducing-bline-a-new-rapid-polyline-autonomous-path-planning-suite/509778)** — discussion, feedback, and announcements.
 
 ![BLine GUI Demo](assets/readme/gui_demo.gif)
 
 ![Robot Following BLine Path](assets/readme/cone-demo.gif)
 
+## Timeline Workflow
+
+BUI keeps BLine-GUI's canvas editor and adds a video-editor-style timeline:
+
+- Three-region layout: field canvas, property sidebar, and full-width bottom timeline.
+- Playback and scrubbing live in the timeline.
+- Time-based axis with zoom, scrolling, and fit-to-view.
+- Path structure, event triggers, and ranged constraints are visible in sequence.
+- Event triggers and ranged constraints can be edited directly from the timeline.
+- Selection sync between the canvas, timeline, and sidebar.
+
 ## Installation
 
-### Prebuilt Binaries (Recommended)
+### Prebuilt Binaries
 
-Download the latest release for your platform from the [**Releases page**](https://github.com/edanliahovetsky/BLine-GUI/releases/latest).
+Download the latest release for your platform from the
+[**Releases page**](https://github.com/jamespeilunli/BUI/releases/latest).
 
-#### Windows
+### From Source
 
-Choose one of the following:
-
-**Installer (Recommended)**
-1. Download `BLine-{version}-Setup.exe`
-2. Run the installer and follow the wizard
-3. Launch BLine from the Start Menu
-
-**Portable (No Installation)**
-1. Download `BLine-{version}-Windows-Portable.zip`
-2. Extract anywhere
-3. Run `BLine.exe`
-
-No Python installation required—everything is bundled!
-
-#### Linux
-
-**AppImage (All Distributions)**
-1. Download `BLine-x86_64.AppImage`
-2. Make it executable:
-   ```bash
-   chmod +x BLine-x86_64.AppImage
-   ```
-3. Run it:
-   ```bash
-   ./BLine-x86_64.AppImage
-   ```
-
-No installation or dependencies required!
-
-#### macOS
-
-**DMG (Apple Silicon)**
-1. Download `BLine-{version}-macOS-arm64.dmg` from [Releases](https://github.com/edanliahovetsky/BLine-GUI/releases)
-2. Open the DMG and drag BLine to your Applications folder
-3. Launch BLine from Applications
-
----
-
-### Install from Source
-
-If you prefer to install via Python package or need the latest development version:
-
-**Quick Install (all platforms):**
-```bash
-pipx install git+https://github.com/edanliahovetsky/BLine-GUI.git
-```
-
-Then run `bline` from anywhere. Don't have pipx? See platform-specific instructions below.
-
-<details>
-<summary><strong>Windows</strong></summary>
-
-#### Using pipx (Recommended)
-
-```powershell
-# Install pipx (one-time setup)
-pip install pipx
-pipx ensurepath
-
-# Restart your terminal, then install BLine
-pipx install git+https://github.com/edanliahovetsky/BLine-GUI.git
-```
-
-**Troubleshooting:** If you get a PySide6 build error, install Python 3.11 or 3.12 from [python.org](https://www.python.org/downloads/windows/) and specify it:
-
-```powershell
-py -3.12 -m pip install --upgrade pip pipx
-py -3.12 -m pipx ensurepath
-py -3.12 -m pipx install git+https://github.com/edanliahovetsky/BLine-GUI.git
-```
-
-#### Using pip
-
-```powershell
-# Create a folder for BLine
-mkdir %USERPROFILE%\BLine
-cd %USERPROFILE%\BLine
-
-# Create a virtual environment and install
-python -m venv .venv
-.venv\Scripts\activate
-pip install git+https://github.com/edanliahovetsky/BLine-GUI.git
-
-# Run BLine
-bline
-```
-
-</details>
-
-<details>
-<summary><strong>macOS</strong></summary>
-
-#### Using Homebrew (Recommended)
+This repo uses Python 3.11+ and PySide6.
 
 ```bash
-# Install Homebrew if needed
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Install pipx and BLine
-brew install pipx
-pipx ensurepath
-pipx install git+https://github.com/edanliahovetsky/BLine-GUI.git
+git clone https://github.com/jamespeilunli/BUI.git
+cd BUI
+uv sync
+uv run main.py
 ```
 
-#### Using pip
+### As a Python Package
+
+When installed as a package, the application entry point is `bui`:
 
 ```bash
-# Create a folder for BLine
-mkdir -p ~/Applications/BLine
-cd ~/Applications/BLine
-
-# Create a virtual environment and install
-python3 -m venv .venv
-source .venv/bin/activate
-pip install git+https://github.com/edanliahovetsky/BLine-GUI.git
-
-# Run BLine
-bline
+uv tool install git+https://github.com/jamespeilunli/BUI.git
+bui
 ```
 
-</details>
-
-<details>
-<summary><strong>Linux</strong></summary>
-
-#### Using pipx (Recommended)
+To create a desktop shortcut after package installation:
 
 ```bash
-# Install pipx
-# Debian/Ubuntu:
-sudo apt install pipx
-
-# Fedora:
-sudo dnf install pipx
-
-# Arch:
-sudo pacman -S python-pipx
-
-# Install BLine
-pipx ensurepath
-pipx install git+https://github.com/edanliahovetsky/BLine-GUI.git
+bui --create-shortcut
 ```
-
-**Troubleshooting:** If you get a PySide6 build error, specify Python 3.11 or 3.12:
-
-```bash
-pipx install --python python3.12 git+https://github.com/edanliahovetsky/BLine-GUI.git
-```
-
-#### Using pip
-
-```bash
-# Create a folder for BLine
-mkdir -p ~/Applications/BLine
-cd ~/Applications/BLine
-
-# Create a virtual environment and install
-python3 -m venv .venv
-source .venv/bin/activate
-pip install git+https://github.com/edanliahovetsky/BLine-GUI.git
-
-# Run BLine
-bline
-```
-
-</details>
 
 ## Quick Start
 
-**Binary installation:** Launch BLine from your Start Menu (Windows), Applications folder, or run the executable directly.
-
-**Python package installation:** Run `bline` from any terminal. To create a desktop shortcut with the BLine icon, run `bline --create-shortcut`.
-
-For guides on path elements, constraints, the GUI interface, and more, see the **[Documentation](https://edanliahovetsky.github.io/BLine-Docs/)**.
+1. Launch `bui` or run `uv run main.py` from the repo.
+2. Open an FRC project or autos project directory.
+3. Edit path geometry on the field canvas.
+4. Use the bottom timeline to inspect path order, scrub playback, place triggers, and edit ranged
+   constraints.
+5. Use the right sidebar for exact values and detailed properties.
 
 ## Development
 
-For contributors who want to work on BLine itself:
-
-### Requirements
-
-- Python 3.11+
-- PySide6 (installed automatically via `requirements.txt`)
-
-### Setup
+Common commands:
 
 ```bash
-git clone https://github.com/edanliahovetsky/BLine-GUI.git
-cd BLine-GUI
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-python main.py
+uv sync
+uv run main.py
+uv run ruff format
+uv run ruff check
+uv run mypy
+uv run pytest
 ```
 
-Alternatively, run `./scripts/dev_env.sh` to create the virtualenv, install dependencies, and launch the GUI in one step.
+The required test command for this repo is:
 
-### Development Workflow
+```bash
+uv run pytest
+```
 
-Common tasks are provided via the `Makefile`:
+Read `AGENTS.md`, `docs/DESIGN.md`, and `docs/DEVELOPMENT.md` before making UI changes.
 
-| Command       | Description                         |
-|---------------|-------------------------------------|
-| `make install`| Install dependencies into `.venv`   |
-| `make run`    | Launch the GUI                      |
-| `make fmt`    | Run Black + Ruff formatting         |
-| `make lint`   | Run Ruff and MyPy                   |
-| `make test`   | Execute the pytest suite            |
+## Project Layout
 
-### Project Layout
-
-- `main.py` — Application entry point
-- `models/` — Path data structures and simulation logic
-- `ui/` — Qt widgets (canvas, sidebar, dialogs, main window)
-- `utils/` — Project persistence, undo stack, helpers
-- `example_project/` — Sample configs and paths for experimentation
-
-### Tests & CI
-
-Unit tests live under `tests/` and focus on the pure-Python logic in `models/` and `utils/`.
-GitHub Actions runs `ruff`, `black --check`, `mypy`, and `pytest` on every push and pull request.
+- `main.py` - Application entry point and BUI app identity.
+- `models/` - Path data structures, ordinal remapping, and simulation helpers.
+- `ui/canvas/` - Field canvas and geometry editing.
+- `ui/timeline/` - Timeline dock, projection, transport, editing, zoom, and track rendering.
+- `ui/sidebar/` - Property inspector and exact-value controls.
+- `ui/main_window/` - Three-region shell, menus, autosave, undo/redo, and cross-region wiring.
+- `utils/` - Project persistence, path/config IO, settings, and undo commands.
+- `docs/` - Design principles, architecture context, and upstream sync notes.
+- `tests/` - Unit and integration tests for model, IO, timeline, sidebar, canvas, and main-window behavior.
+- `packaging/` - Build scripts and PyInstaller/Inno/AppImage packaging files.
 
 ## License
 
-BSD 3-Clause License — See [LICENSE](LICENSE) file.
+BSD 3-Clause License. See [LICENSE](LICENSE).

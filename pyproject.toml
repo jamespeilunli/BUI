@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "bui"
 version = "0.5.0-beta.5"
 description = "A PySide6 GUI for planning and simulating FRC robot paths."
-readme = "docs/README.md"
+readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "FRC PTP Maintainers" }]
 dependencies = [
@@ -20,7 +20,6 @@ bui = "main:main"
 
 [dependency-groups]
 dev = [
-    "black>=24.8.0",
     "mypy>=1.11.0",
     "pytest>=8.2.0",
     "pytest-cov>=5.0.0",
@@ -37,10 +36,6 @@ include-package-data = true
 
 [tool.setuptools.data-files]
 "bui_assets" = ["assets/*.png"]
-
-[tool.black]
-line-length = 100
-target-version = ["py311"]
 
 [tool.ruff]
 target-version = "py311"

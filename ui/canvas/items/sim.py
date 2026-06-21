@@ -36,10 +36,14 @@ class RobotSimItem(QGraphicsRectItem):
                 protrusion_distance_m = max(
                     0.0, float(cfg.get("protrusion_distance_meters", protrusion_distance_m) or 0.0)
                 )
-                protrusion_side = str(cfg.get("protrusion_side", protrusion_side) or "none").strip().lower()
-                protrusion_default_state = str(
-                    cfg.get("protrusion_default_state", protrusion_default_state) or ""
-                ).strip().lower()
+                protrusion_side = (
+                    str(cfg.get("protrusion_side", protrusion_side) or "none").strip().lower()
+                )
+                protrusion_default_state = (
+                    str(cfg.get("protrusion_default_state", protrusion_default_state) or "")
+                    .strip()
+                    .lower()
+                )
         except Exception:
             pass
         self.setBrush(QBrush(QColor(255, 165, 0, 120)))
@@ -66,9 +70,9 @@ class RobotSimItem(QGraphicsRectItem):
         protrusion_side: str = "none",
     ):
         x_min = -(length_m / 2.0)
-        x_max = (length_m / 2.0)
+        x_max = length_m / 2.0
         y_min = -(width_m / 2.0)
-        y_max = (width_m / 2.0)
+        y_max = width_m / 2.0
         side = str(protrusion_side or "none").strip().lower()
         distance = max(0.0, float(protrusion_distance_m))
         if protrusion_visible and distance > 0.0:

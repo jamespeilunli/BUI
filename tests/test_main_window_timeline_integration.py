@@ -383,7 +383,10 @@ def test_timeline_constraint_create_update_delete_records_undo_and_autosave(
         )
         process_events()
 
-        assert (window.path.ranged_constraints[0].start_ordinal, window.path.ranged_constraints[0].end_ordinal) == (
+        assert (
+            window.path.ranged_constraints[0].start_ordinal,
+            window.path.ranged_constraints[0].end_ordinal,
+        ) == (
             2,
             2,
         )
@@ -591,7 +594,9 @@ def test_sidebar_rejects_programmatic_cross_domain_constraint_type_change(
         window.sidebar.select_constraint_range_by_index(0, "max_velocity_meters_per_sec", 1, 2)
         process_events()
 
-        window.sidebar._constraint_type_key_by_label["Rotation Velocity"] = "max_velocity_deg_per_sec"
+        window.sidebar._constraint_type_key_by_label["Rotation Velocity"] = (
+            "max_velocity_deg_per_sec"
+        )
         window.sidebar.on_constraint_type_change("Rotation Velocity")
 
         assert window.path.ranged_constraints[0].key == "max_velocity_meters_per_sec"

@@ -39,7 +39,9 @@ class SegmentBar(QWidget):
     segmentSelected = Signal(int)
     segmentBoundaryDragged = Signal(int, int, int)  # seg_idx, new_start, new_end
     segmentMoved = Signal(int, int, int)  # seg_idx, new_start, new_end (whole segment drag)
-    adjacentBoundaryDragged = Signal(int, int, int, int, int, int)  # seg_a_idx, a_start, a_end, seg_b_idx, b_start, b_end
+    adjacentBoundaryDragged = Signal(
+        int, int, int, int, int, int
+    )  # seg_a_idx, a_start, a_end, seg_b_idx, b_start, b_end
     segmentBoundaryDragFinished = Signal()
     gapDoubleClicked = Signal(int, int)
     deleteRequested = Signal(int)
@@ -444,11 +446,17 @@ class SegmentBar(QWidget):
                 if adj_idx >= 0:
                     # Adjacent segment: resize both (shared boundary)
                     adj = self._segments[adj_idx]
-                    new_ordinal = max(new_ordinal, adj.start_ordinal + 1)  # adj must keep at least 1
+                    new_ordinal = max(
+                        new_ordinal, adj.start_ordinal + 1
+                    )  # adj must keep at least 1
                     adj.end_ordinal = new_ordinal - 1
                     self.adjacentBoundaryDragged.emit(
-                        adj_idx, adj.start_ordinal, adj.end_ordinal,
-                        seg_idx, new_ordinal, seg.end_ordinal,
+                        adj_idx,
+                        adj.start_ordinal,
+                        adj.end_ordinal,
+                        seg_idx,
+                        new_ordinal,
+                        seg.end_ordinal,
                     )
                 else:
                     # No adjacent: clamp against other non-adjacent segments
@@ -472,15 +480,22 @@ class SegmentBar(QWidget):
                     new_ordinal = min(new_ordinal, adj.end_ordinal - 1)  # adj must keep at least 1
                     adj.start_ordinal = new_ordinal + 1
                     self.adjacentBoundaryDragged.emit(
-                        seg_idx, seg.start_ordinal, new_ordinal,
-                        adj_idx, new_ordinal + 1, adj.end_ordinal,
+                        seg_idx,
+                        seg.start_ordinal,
+                        new_ordinal,
+                        adj_idx,
+                        new_ordinal + 1,
+                        adj.end_ordinal,
                     )
                 else:
                     # No adjacent: clamp against other segments
                     for other in self._segments:
                         if other is seg:
                             continue
-                        if other.start_ordinal > seg.start_ordinal and other.start_ordinal <= new_ordinal:
+                        if (
+                            other.start_ordinal > seg.start_ordinal
+                            and other.start_ordinal <= new_ordinal
+                        ):
                             new_ordinal = other.start_ordinal - 1
                     new_ordinal = min(self._domain_size, new_ordinal)
                     self.segmentBoundaryDragged.emit(seg_idx, seg.start_ordinal, new_ordinal)

@@ -119,10 +119,7 @@ def test_project_manager_persists_simulated_path_display_mode():
     pm.set_simulated_path_display_mode("complete")
 
     assert pm.simulated_path_display_mode() == "complete"
-    assert (
-        pm.settings.value(ProjectManager.KEY_SIMULATED_PATH_DISPLAY_MODE)
-        == "complete"
-    )
+    assert pm.settings.value(ProjectManager.KEY_SIMULATED_PATH_DISPLAY_MODE) == "complete"
 
     pm.set_simulated_path_display_mode("unsupported")
 

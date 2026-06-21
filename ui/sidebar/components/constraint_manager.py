@@ -450,10 +450,13 @@ class ConstraintManager(QObject):
 
         # Create the SegmentBar widget
         from ui.sidebar.utils.constants import SPINNER_UNITS
+
         color = SEGMENT_COLORS.get(key, QColor("#666666"))
         bar = SegmentBar()
         bar.set_domain_size(total)
-        segments = [SegmentData(rc.start_ordinal, rc.end_ordinal, rc.value, color) for rc in ranged_list]
+        segments = [
+            SegmentData(rc.start_ordinal, rc.end_ordinal, rc.value, color) for rc in ranged_list
+        ]
         bar.set_segments(segments)
         unit_suffix = SPINNER_UNITS.get(key, "")
         bar.set_unit_suffix(unit_suffix)
@@ -470,12 +473,20 @@ class ConstraintManager(QObject):
             lambda seg_idx, ns, ne, k=key: self._on_segment_boundary_dragged(k, seg_idx, ns, ne)
         )
         bar.adjacentBoundaryDragged.connect(
-            lambda ai, a_s, a_e, bi, b_s, b_e, k=key: self._on_adjacent_boundary_dragged(k, ai, a_s, a_e, bi, b_s, b_e)
+            lambda ai, a_s, a_e, bi, b_s, b_e, k=key: self._on_adjacent_boundary_dragged(
+                k, ai, a_s, a_e, bi, b_s, b_e
+            )
         )
-        bar.segmentBoundaryDragFinished.connect(lambda k=key: self._on_segment_boundary_drag_finished(k))
+        bar.segmentBoundaryDragFinished.connect(
+            lambda k=key: self._on_segment_boundary_drag_finished(k)
+        )
         bar.gapDoubleClicked.connect(lambda gs, ge, k=key: self._on_gap_double_clicked(k, gs, ge))
-        bar.deleteRequested.connect(lambda seg_idx, k=key: self._on_segment_delete_requested(k, seg_idx))
-        bar.splitRequested.connect(lambda seg_idx, k=key: self._on_segment_split_requested(k, seg_idx))
+        bar.deleteRequested.connect(
+            lambda seg_idx, k=key: self._on_segment_delete_requested(k, seg_idx)
+        )
+        bar.splitRequested.connect(
+            lambda seg_idx, k=key: self._on_segment_split_requested(k, seg_idx)
+        )
 
         # Create controls row: spinbox + Delete + Split
         controls_row = QWidget()
@@ -548,9 +559,11 @@ class ConstraintManager(QObject):
         del_btn.setStyleSheet(
             "QPushButton { border: none; } QPushButton:hover { background: #555; border-radius: 3px; }"
         )
-        del_btn.clicked.connect(lambda checked=False, k=key: self._on_segment_delete_requested(
-            k, self._selected_segment_indices.get(k, -1)
-        ))
+        del_btn.clicked.connect(
+            lambda checked=False, k=key: self._on_segment_delete_requested(
+                k, self._selected_segment_indices.get(k, -1)
+            )
+        )
         controls_layout.addWidget(del_btn)
 
         # Split button
@@ -561,9 +574,11 @@ class ConstraintManager(QObject):
             "QPushButton { border: 1px solid #555; border-radius: 3px; padding: 2px 8px; color: #ccc; }"
             " QPushButton:hover { background: #555; }"
         )
-        split_btn.clicked.connect(lambda checked=False, k=key: self._on_segment_split_requested(
-            k, self._selected_segment_indices.get(k, -1)
-        ))
+        split_btn.clicked.connect(
+            lambda checked=False, k=key: self._on_segment_split_requested(
+                k, self._selected_segment_indices.get(k, -1)
+            )
+        )
         controls_layout.addWidget(split_btn)
 
         # Pop-out button
@@ -674,9 +689,7 @@ class ConstraintManager(QObject):
             # Refresh references — the undo system may have replaced
             # path.ranged_constraints with deepcopy clones since the bar
             # was last built, making _segment_rc_lists stale.
-            ranged_list = [
-                rc for rc in (self.path.ranged_constraints or []) if rc.key == key
-            ]
+            ranged_list = [rc for rc in (self.path.ranged_constraints or []) if rc.key == key]
             ranged_list.sort(key=lambda rc: rc.start_ordinal)
             self._segment_rc_lists[key] = ranged_list
             try:
@@ -694,13 +707,13 @@ class ConstraintManager(QObject):
             except Exception:
                 traceback.print_exc()
 
-    def _on_adjacent_boundary_dragged(self, key: str, a_idx: int, a_start: int, a_end: int, b_idx: int, b_start: int, b_end: int):
+    def _on_adjacent_boundary_dragged(
+        self, key: str, a_idx: int, a_start: int, a_end: int, b_idx: int, b_start: int, b_end: int
+    ):
         """Handle dragging a shared boundary between two adjacent segments."""
         if not self._boundary_drag_started:
             self._boundary_drag_started = True
-            ranged_list = [
-                rc for rc in (self.path.ranged_constraints or []) if rc.key == key
-            ]
+            ranged_list = [rc for rc in (self.path.ranged_constraints or []) if rc.key == key]
             ranged_list.sort(key=lambda rc: rc.start_ordinal)
             self._segment_rc_lists[key] = ranged_list
             try:
@@ -746,7 +759,9 @@ class ConstraintManager(QObject):
 
         default_val = self.get_default_value(key)
 
-        rc = RangedConstraint(key=key, value=default_val, start_ordinal=gap_start, end_ordinal=gap_end)
+        rc = RangedConstraint(
+            key=key, value=default_val, start_ordinal=gap_start, end_ordinal=gap_end
+        )
         if self.path.ranged_constraints is None:
             self.path.ranged_constraints = []
         self.path.ranged_constraints.append(rc)
@@ -842,7 +857,9 @@ class ConstraintManager(QObject):
         self._segment_rc_lists[key] = ranged_list
 
         color = SEGMENT_COLORS.get(key, QColor("#666666"))
-        segments = [SegmentData(rc.start_ordinal, rc.end_ordinal, rc.value, color) for rc in ranged_list]
+        segments = [
+            SegmentData(rc.start_ordinal, rc.end_ordinal, rc.value, color) for rc in ranged_list
+        ]
         bar.set_segments(segments)
 
         # Update domain size in case it changed
@@ -985,9 +1002,7 @@ class ConstraintManager(QObject):
 
     def _on_popout_segment_selected(self, key: str, segment_index: int):
         """Handle segment selection in the popout -- sync sidebar and emit highlight."""
-        rc_list = [
-            rc for rc in (self.path.ranged_constraints or []) if rc.key == key
-        ]
+        rc_list = [rc for rc in (self.path.ranged_constraints or []) if rc.key == key]
         rc_list.sort(key=lambda rc: rc.start_ordinal)
         if 0 <= segment_index < len(rc_list):
             rc = rc_list[segment_index]
@@ -1074,10 +1089,9 @@ class ConstraintManager(QObject):
         """Select a ranged-constraint segment matching exact ordinals."""
         rc_list = self._segment_rc_lists.get(key, [])
         for idx, rc in enumerate(rc_list):
-            if (
-                int(getattr(rc, "start_ordinal", -1)) == int(start_ordinal)
-                and int(getattr(rc, "end_ordinal", -1)) == int(end_ordinal)
-            ):
+            if int(getattr(rc, "start_ordinal", -1)) == int(start_ordinal) and int(
+                getattr(rc, "end_ordinal", -1)
+            ) == int(end_ordinal):
                 bar = self._segment_bars.get(key)
                 if bar is not None:
                     bar.blockSignals(True)

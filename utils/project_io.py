@@ -467,9 +467,8 @@ def _repair_loaded_ranged_constraints(path: Path) -> None:
             if ordinal in covered:
                 if run_start is not None:
                     candidate = (run_start, ordinal - 1)
-                    if (
-                        best_run is None
-                        or (candidate[1] - candidate[0]) > (best_run[1] - best_run[0])
+                    if best_run is None or (candidate[1] - candidate[0]) > (
+                        best_run[1] - best_run[0]
                     ):
                         best_run = candidate
                     run_start = None
@@ -479,10 +478,7 @@ def _repair_loaded_ranged_constraints(path: Path) -> None:
 
         if run_start is not None:
             candidate = (run_start, end)
-            if (
-                best_run is None
-                or (candidate[1] - candidate[0]) > (best_run[1] - best_run[0])
-            ):
+            if best_run is None or (candidate[1] - candidate[0]) > (best_run[1] - best_run[0]):
                 best_run = candidate
 
         if best_run is None:

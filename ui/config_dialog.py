@@ -419,7 +419,9 @@ class ConfigDialog(QDialog):
         edit = QLineEdit(self)
         edit.setPlaceholderText("Comma-separated event keys")
         edit.setText(self._join_keys(cfg.get(key, [])))
-        edit.textChanged.connect(lambda _t, k=key, w=edit: self._emit_change(k, self._split_keys(w.text())))
+        edit.textChanged.connect(
+            lambda _t, k=key, w=edit: self._emit_change(k, self._split_keys(w.text()))
+        )
         self._controls[key] = edit
         self._add_row(group_layout, label, edit)
 
@@ -508,14 +510,18 @@ class ConfigDialog(QDialog):
             "default_intermediate_handoff_radius_meters": _spin_value(
                 "default_intermediate_handoff_radius_meters", 0.2
             ),
-            "default_max_velocity_deg_per_sec": _spin_value("default_max_velocity_deg_per_sec", 720.0),
+            "default_max_velocity_deg_per_sec": _spin_value(
+                "default_max_velocity_deg_per_sec", 720.0
+            ),
             "default_max_acceleration_deg_per_sec2": _spin_value(
                 "default_max_acceleration_deg_per_sec2", 1500.0
             ),
             "default_end_translation_tolerance_meters": _spin_value(
                 "default_end_translation_tolerance_meters", 0.03
             ),
-            "default_end_rotation_tolerance_deg": _spin_value("default_end_rotation_tolerance_deg", 2.0),
+            "default_end_rotation_tolerance_deg": _spin_value(
+                "default_end_rotation_tolerance_deg", 2.0
+            ),
         }
 
     def _emit_change(self, key: str, value: Any):
@@ -558,9 +564,13 @@ class ConfigDialog(QDialog):
             try:
                 state_ctrl.blockSignals(True)
                 enabled_ctrl = self._controls.get("protrusion_enabled")
-                enabled = bool(enabled_ctrl.isChecked()) if isinstance(enabled_ctrl, QCheckBox) else False
+                enabled = (
+                    bool(enabled_ctrl.isChecked()) if isinstance(enabled_ctrl, QCheckBox) else False
+                )
                 if enabled:
-                    state_ctrl.setCurrentText(self._normalize_state(cfg.get("protrusion_default_state", "")))
+                    state_ctrl.setCurrentText(
+                        self._normalize_state(cfg.get("protrusion_default_state", ""))
+                    )
                 else:
                     state_ctrl.setCurrentText("")
             finally:

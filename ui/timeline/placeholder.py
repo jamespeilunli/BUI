@@ -218,7 +218,7 @@ def _distribute_integer_heights(values: list[float], target_total: int) -> list[
     if remainder > 0:
         order = sorted(
             range(len(values)),
-            key=lambda idx: (values[idx] - floored[idx]),
+            key=lambda idx: values[idx] - floored[idx],
             reverse=True,
         )
         for idx in order[:remainder]:
@@ -226,7 +226,7 @@ def _distribute_integer_heights(values: list[float], target_total: int) -> list[
     elif remainder < 0:
         order = sorted(
             range(len(values)),
-            key=lambda idx: (values[idx] - floored[idx]),
+            key=lambda idx: values[idx] - floored[idx],
         )
         for idx in order[: abs(remainder)]:
             floored[idx] -= 1
@@ -597,7 +597,9 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
             max(1.0, row_height - (vertical_padding * 2.0)),
         )
 
-    def _lane_metrics(self, row: TimelineRow, track_rect: QRectF) -> tuple[int, float, float, float]:
+    def _lane_metrics(
+        self, row: TimelineRow, track_rect: QRectF
+    ) -> tuple[int, float, float, float]:
         lane_count = max(1, int(row.lane_count), self._preview_lane_count_for_row(row))
         available_h = max(1.0, track_rect.height())
         lane_gap = 3.0
@@ -781,7 +783,9 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
     def _draw_markers(self, painter: QPainter, row: TimelineRow, track_rect: QRectF) -> None:
         center_y = track_rect.center().y()
         painter.setPen(QPen(QColor("#3b4148"), 1))
-        painter.drawLine(_qpointf(track_rect.left(), center_y), _qpointf(track_rect.right(), center_y))
+        painter.drawLine(
+            _qpointf(track_rect.left(), center_y), _qpointf(track_rect.right(), center_y)
+        )
 
         last_label_right = -10_000.0
         metrics = painter.fontMetrics()
@@ -1130,7 +1134,9 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
         right_idx = bisect.bisect_left(positions, s_m)
         left_idx = max(0, right_idx - 1)
         right_idx = min(total - 1, right_idx)
-        if abs(float(s_m) - float(positions[left_idx])) <= abs(float(positions[right_idx]) - float(s_m)):
+        if abs(float(s_m) - float(positions[left_idx])) <= abs(
+            float(positions[right_idx]) - float(s_m)
+        ):
             return left_idx + 1
         return right_idx + 1
 
@@ -1509,7 +1515,9 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                 if self._constraint_add_armed:
                     self._update_constraint_add_cursor(float(event.position().y()))
                 else:
-                    self._update_hover_feedback(float(event.position().x()), float(event.position().y()))
+                    self._update_hover_feedback(
+                        float(event.position().x()), float(event.position().y())
+                    )
                 self.update()
             event.accept()
             return
@@ -1569,7 +1577,9 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
                 self._pressed_constraint_drag_offset = 0
                 self._pressed_constraint_move_press_s_m = None
                 self._pressed_constraint_move_origin_bounds = None
-                self._update_hover_feedback(float(event.position().x()), float(event.position().y()))
+                self._update_hover_feedback(
+                    float(event.position().x()), float(event.position().y())
+                )
                 self.update()
             event.accept()
             return
@@ -1608,7 +1618,9 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
 
         if self._scrub_moved or not self._pressed_on_playhead:
             self._emit_scrub_for_event(event)
-        should_toggle = self._pressed_on_playhead and self._is_playhead_click(event) and not self._scrub_moved
+        should_toggle = (
+            self._pressed_on_playhead and self._is_playhead_click(event) and not self._scrub_moved
+        )
         self._scrub_active = False
         self._scrub_moved = False
         self._pressed_on_playhead = False
@@ -1762,11 +1774,15 @@ class _TimelineTrackCanvas(_TimelineCanvasBase):
 
             row = self._row_at_y(float(y)) if y is not None else None
             if row is not None and row.title == "Structure":
-                hover_s = self._s_for_x(float(x)) if x is not None else self._structure_add_hover_s_m
+                hover_s = (
+                    self._s_for_x(float(x)) if x is not None else self._structure_add_hover_s_m
+                )
                 if hover_s is not None:
                     self._structure_add_hover_s_m = float(hover_s)
                     self._structure_add_hover_valid = self._structure_add_is_valid(float(hover_s))
-                self.setCursor(Qt.CrossCursor if self._structure_add_hover_valid else Qt.ForbiddenCursor)
+                self.setCursor(
+                    Qt.CrossCursor if self._structure_add_hover_valid else Qt.ForbiddenCursor
+                )
                 label = STRUCTURE_ADD_LABELS.get(self._structure_add_type, "Structure")
                 self.setToolTip(
                     f"Click to add {label}"
@@ -2348,7 +2364,7 @@ class TimelineDock(QFrame):
             return
         current_zoom = int(self._track_canvas._zoom_px_per_m)
         zoom_steps = float(delta_y) / 120.0
-        zoom_ratio = 1.12 ** zoom_steps
+        zoom_ratio = 1.12**zoom_steps
         target_zoom = int(round(current_zoom * zoom_ratio))
         if target_zoom == current_zoom:
             target_zoom = current_zoom + (1 if delta_y > 0 else -1)
@@ -2487,7 +2503,9 @@ class TimelineDock(QFrame):
             self._track_scroll.verticalScrollBar().minimum(),
             self._track_scroll.verticalScrollBar().maximum(),
         )
-        self._rail_scroll.verticalScrollBar().setValue(self._track_scroll.verticalScrollBar().value())
+        self._rail_scroll.verticalScrollBar().setValue(
+            self._track_scroll.verticalScrollBar().value()
+        )
 
     def _restore_scroll_state(self, hbar_value: int, vbar_value: int) -> None:
         hbar = self._track_scroll.horizontalScrollBar()
@@ -2570,7 +2588,11 @@ class TimelineDock(QFrame):
             return
         if self._selection.kind == "path":
             index = self._selection.path_index
-            if index is None or index < 0 or index >= len(getattr(self._path, "path_elements", []) or []):
+            if (
+                index is None
+                or index < 0
+                or index >= len(getattr(self._path, "path_elements", []) or [])
+            ):
                 self._selection = None
         elif self._selection.kind == "constraint":
             index = self._selection.constraint_index
@@ -2615,7 +2637,7 @@ class TimelineDock(QFrame):
                     True,
                     item_type,
                 )
-        )
+            )
         menu.exec(QCursor.pos())
 
     def _show_constraint_add_menu(self, domain: str) -> None:
@@ -2796,7 +2818,9 @@ class TimelineDock(QFrame):
     def _ensure_playhead_visible(self) -> None:
         hbar = self._track_scroll.horizontalScrollBar()
         viewport_width = max(1, self._track_scroll.viewport().width())
-        playhead_x = TRACK_PADDING_X + self._current_time_s * float(self._track_canvas._zoom_px_per_m)
+        playhead_x = TRACK_PADDING_X + self._current_time_s * float(
+            self._track_canvas._zoom_px_per_m
+        )
         visible_left = float(hbar.value())
         visible_right = visible_left + float(viewport_width)
         margin = min(96.0, viewport_width * 0.25)
@@ -2805,6 +2829,7 @@ class TimelineDock(QFrame):
             hbar.setValue(int(round(playhead_x - margin)))
         elif playhead_x > visible_right - margin:
             hbar.setValue(int(round(playhead_x - viewport_width + margin)))
+
 
 TimelinePlaceholder = TimelineDock
 
@@ -3067,7 +3092,9 @@ def _build_constraint_spans(
         if element_index is None:
             domain_positions.append(0.0)
             continue
-        domain_positions.append(_element_global_s(element_index, element, path_elements, anchor_s_by_path_index))
+        domain_positions.append(
+            _element_global_s(element_index, element, path_elements, anchor_s_by_path_index)
+        )
     spans: list[TimelineSpan] = []
     for rc_index, rc in enumerate(getattr(path, "ranged_constraints", []) or []):
         if getattr(rc, "key", "") != key:

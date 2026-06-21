@@ -46,9 +46,7 @@ class ProjectConfig:
         return True, current
 
     @classmethod
-    def _lookup_any(
-        cls, data: Mapping[str, Any], paths: List[Tuple[str, ...]]
-    ) -> Tuple[bool, Any]:
+    def _lookup_any(cls, data: Mapping[str, Any], paths: List[Tuple[str, ...]]) -> Tuple[bool, Any]:
         for path in paths:
             found, value = cls._lookup_path(data, path)
             if found:
@@ -187,9 +185,7 @@ class ProjectConfig:
             [("protrusion_side",), ("gui", "protrusions", "side")],
         )
         if side_found:
-            self.protrusion_side = self._normalize_protrusion_side(
-                side_value, self.protrusion_side
-            )
+            self.protrusion_side = self._normalize_protrusion_side(side_value, self.protrusion_side)
 
         default_state_found, default_state_value = self._lookup_any(
             data,
@@ -242,9 +238,19 @@ class ProjectConfig:
             "robot_protrusion_right_meters",
         )
         legacy_present = any(key in data for key in legacy_keys)
-        new_protrusion_present = any(
-            (enabled_found, distance_found, side_found, default_state_found, show_found, hide_found)
-        ) or self._lookup_path(data, ("gui", "protrusions"))[0]
+        new_protrusion_present = (
+            any(
+                (
+                    enabled_found,
+                    distance_found,
+                    side_found,
+                    default_state_found,
+                    show_found,
+                    hide_found,
+                )
+            )
+            or self._lookup_path(data, ("gui", "protrusions"))[0]
+        )
         if legacy_present and not new_protrusion_present:
             enabled, distance, side = self._legacy_protrusion_conversion(data)
             self.protrusion_enabled = enabled
@@ -322,7 +328,9 @@ class ProjectConfig:
                 "default_end_translation_tolerance_meters": float(
                     self.default_end_translation_tolerance_meters
                 ),
-                "default_end_rotation_tolerance_deg": float(self.default_end_rotation_tolerance_deg),
+                "default_end_rotation_tolerance_deg": float(
+                    self.default_end_rotation_tolerance_deg
+                ),
             },
         }
 

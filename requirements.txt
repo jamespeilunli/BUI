@@ -4,8 +4,6 @@ imageio>=2.0
 pyshortcuts>=1.9
 
 # Tooling / development
-black>=24.8.0
 mypy>=1.11.0
 pytest>=8.2.0
 ruff>=0.6.5
-

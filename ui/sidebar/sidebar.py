@@ -222,7 +222,9 @@ class Sidebar(QWidget):
         parent_layout.addWidget(self.form_container, 1)
 
     def _connect_component_signals(self) -> None:
-        self.element_manager.elementAdded.connect(lambda idx, elem: self.modelStructureChanged.emit())
+        self.element_manager.elementAdded.connect(
+            lambda idx, elem: self.modelStructureChanged.emit()
+        )
         self.element_manager.elementRemoved.connect(
             lambda idx, elem: self.modelStructureChanged.emit()
         )
@@ -316,20 +318,17 @@ class Sidebar(QWidget):
     def _constraint_domain_keys_for_key(self, key: str) -> list[str]:
         if str(key) in TRANSLATION_CONSTRAINT_KEYS:
             return [
-                str(item)
-                for item in RANGED_CONSTRAINT_KEYS
-                if item in TRANSLATION_CONSTRAINT_KEYS
+                str(item) for item in RANGED_CONSTRAINT_KEYS if item in TRANSLATION_CONSTRAINT_KEYS
             ]
         if str(key) in ROTATION_CONSTRAINT_KEYS:
-            return [str(item) for item in RANGED_CONSTRAINT_KEYS if item in ROTATION_CONSTRAINT_KEYS]
+            return [
+                str(item) for item in RANGED_CONSTRAINT_KEYS if item in ROTATION_CONSTRAINT_KEYS
+            ]
         return []
 
     def _constraint_keys_share_domain(self, left: str, right: str) -> bool:
         return bool(
-            (
-                str(left) in TRANSLATION_CONSTRAINT_KEYS
-                and str(right) in TRANSLATION_CONSTRAINT_KEYS
-            )
+            (str(left) in TRANSLATION_CONSTRAINT_KEYS and str(right) in TRANSLATION_CONSTRAINT_KEYS)
             or (str(left) in ROTATION_CONSTRAINT_KEYS and str(right) in ROTATION_CONSTRAINT_KEYS)
         )
 
@@ -385,7 +384,9 @@ class Sidebar(QWidget):
 
         self.refresh_current_selection()
 
-    def select_index(self, index: int, propagate_to_canvas: bool = True, defer: bool = True) -> None:
+    def select_index(
+        self, index: int, propagate_to_canvas: bool = True, defer: bool = True
+    ) -> None:
         if self.path is None or index is None:
             return
         if index < 0 or index >= len(self.path.path_elements):
@@ -398,7 +399,10 @@ class Sidebar(QWidget):
             self._selected_index = int(index)
             self._last_selected_index = int(index)
             self._selected_element_identity = id(self.path.path_elements[index])
-            if not propagate_to_canvas and self._selected_index != self._last_emitted_selected_index:
+            if (
+                not propagate_to_canvas
+                and self._selected_index != self._last_emitted_selected_index
+            ):
                 self._suppress_element_selected_emit_once = True
             self.on_item_selected()
 
@@ -769,7 +773,9 @@ class Sidebar(QWidget):
             return False
 
         if emit_preview:
-            self.constraintRangePreviewRequested.emit(str(key), int(start_ordinal), int(end_ordinal))
+            self.constraintRangePreviewRequested.emit(
+                str(key), int(start_ordinal), int(end_ordinal)
+            )
         self._show_constraint(rc)
         return True
 

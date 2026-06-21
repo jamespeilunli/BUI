@@ -100,8 +100,12 @@ def test_rotation_constraints_appear_only_on_rotation_constraint_row():
     )
 
     projection = _build_projection(path, {}, use_sim_time=False)
-    translation_row = next(row for row in projection.rows if row.title == TRANSLATION_CONSTRAINT_ROW_TITLE)
-    rotation_row = next(row for row in projection.rows if row.title == ROTATION_CONSTRAINT_ROW_TITLE)
+    translation_row = next(
+        row for row in projection.rows if row.title == TRANSLATION_CONSTRAINT_ROW_TITLE
+    )
+    rotation_row = next(
+        row for row in projection.rows if row.title == ROTATION_CONSTRAINT_ROW_TITLE
+    )
 
     assert key not in translation_row.constraint_positions_by_key
     assert [span.constraint_key for span in rotation_row.spans] == [key]
@@ -131,26 +135,34 @@ def test_timeline_constraint_domains_ignore_unrelated_structure_elements():
     base_projection = _build_projection(base, {}, use_sim_time=False)
     event_projection = _build_projection(with_events, {}, use_sim_time=False)
 
-    assert _constraint_row_for_key(
-        base_projection,
-        "max_velocity_deg_per_sec",
-    ).constraint_positions_by_key["max_velocity_deg_per_sec"] == _constraint_row_for_key(
-        event_projection,
-        "max_velocity_deg_per_sec",
-    ).constraint_positions_by_key["max_velocity_deg_per_sec"]
-    assert _constraint_row_for_key(
-        base_projection,
-        "max_velocity_meters_per_sec",
-    ).constraint_positions_by_key["max_velocity_meters_per_sec"] == _constraint_row_for_key(
-        event_projection,
-        "max_velocity_meters_per_sec",
-    ).constraint_positions_by_key["max_velocity_meters_per_sec"]
+    assert (
+        _constraint_row_for_key(
+            base_projection,
+            "max_velocity_deg_per_sec",
+        ).constraint_positions_by_key["max_velocity_deg_per_sec"]
+        == _constraint_row_for_key(
+            event_projection,
+            "max_velocity_deg_per_sec",
+        ).constraint_positions_by_key["max_velocity_deg_per_sec"]
+    )
+    assert (
+        _constraint_row_for_key(
+            base_projection,
+            "max_velocity_meters_per_sec",
+        ).constraint_positions_by_key["max_velocity_meters_per_sec"]
+        == _constraint_row_for_key(
+            event_projection,
+            "max_velocity_meters_per_sec",
+        ).constraint_positions_by_key["max_velocity_meters_per_sec"]
+    )
 
 
 def test_constraint_span_edges_align_to_domain_positions():
     projection = _build_projection(_path_with_constraints(), {}, use_sim_time=False)
     row = _constraint_row_for_key(projection, "max_acceleration_meters_per_sec2")
-    span = next(span for span in row.spans if span.constraint_key == "max_acceleration_meters_per_sec2")
+    span = next(
+        span for span in row.spans if span.constraint_key == "max_acceleration_meters_per_sec2"
+    )
     positions = row.constraint_positions_by_key["max_acceleration_meters_per_sec2"]
 
     # The displayed bar shows the effective path segment affected by the
@@ -322,7 +334,9 @@ def test_overlapping_constraint_drag_preview_remains_valid(qt_app):
     dock = TimelineDock(path)
     canvas = dock._track_canvas
     row = _constraint_row_for_key(dock._projection, key)
-    span = next(span for span in row.spans if span.constraint_key == key and span.start_ordinal == 1)
+    span = next(
+        span for span in row.spans if span.constraint_key == key and span.start_ordinal == 1
+    )
     positions = row.constraint_positions_by_key[key]
 
     canvas._pressed_constraint_span = span

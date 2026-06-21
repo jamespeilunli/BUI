@@ -23,6 +23,7 @@ from models.ordinal_remap import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_path(*elements, constraints=None):
     """Build a Path with the given elements and optional ranged constraints."""
     p = Path(path_elements=list(elements))
@@ -34,6 +35,7 @@ def _make_path(*elements, constraints=None):
 # ---------------------------------------------------------------------------
 # Domain helpers
 # ---------------------------------------------------------------------------
+
 
 class TestDomainHelpers:
     def test_translation_domain_includes_translation_and_waypoint(self):
@@ -61,14 +63,17 @@ class TestDomainHelpers:
 # Addition tests
 # ---------------------------------------------------------------------------
 
+
 class TestAddition:
     def test_insert_before_shifts_ordinals_forward(self):
         """Inserting a TranslationTarget before existing ones should shift ordinals."""
         t1 = TranslationTarget()
         t2 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=2.0,
-            start_ordinal=1, end_ordinal=2,
+            key="max_velocity_meters_per_sec",
+            value=2.0,
+            start_ordinal=1,
+            end_ordinal=2,
         )
         old_elements = [t1, t2]
         # Insert a new TranslationTarget at position 0
@@ -86,8 +91,10 @@ class TestAddition:
         t1 = TranslationTarget()
         t2 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=2.0,
-            start_ordinal=1, end_ordinal=2,
+            key="max_velocity_meters_per_sec",
+            value=2.0,
+            start_ordinal=1,
+            end_ordinal=2,
         )
         old_elements = [t1, t2]
         t_new = TranslationTarget()
@@ -103,8 +110,10 @@ class TestAddition:
         t1 = TranslationTarget()
         t2 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=1, end_ordinal=2,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=1,
+            end_ordinal=2,
         )
         old_elements = [t1, t2]
         t_new = TranslationTarget()
@@ -120,8 +129,10 @@ class TestAddition:
         t1 = TranslationTarget()
         t2 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=2, end_ordinal=2,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=2,
+            end_ordinal=2,
         )
         old_elements = [t1, t2]
         w_new = Waypoint()
@@ -137,8 +148,10 @@ class TestAddition:
         t2 = TranslationTarget()
         t3 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=3, end_ordinal=3,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=3,
+            end_ordinal=3,
         )
         old_elements = [t1, t2, t3]
         w_new = Waypoint()
@@ -154,8 +167,10 @@ class TestAddition:
         t2 = TranslationTarget()
         t3 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=3, end_ordinal=3,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=3,
+            end_ordinal=3,
         )
         old_elements = [t1, t2, t3]
         w_new = Waypoint()
@@ -170,8 +185,10 @@ class TestAddition:
         r1 = RotationTarget()
         r2 = RotationTarget()
         rc = RangedConstraint(
-            key="max_velocity_deg_per_sec", value=90.0,
-            start_ordinal=2, end_ordinal=2,
+            key="max_velocity_deg_per_sec",
+            value=90.0,
+            start_ordinal=2,
+            end_ordinal=2,
         )
         old_elements = [r1, r2]
         w_new = Waypoint()
@@ -186,8 +203,10 @@ class TestAddition:
         t1 = TranslationTarget()
         t2 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=2, end_ordinal=2,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=2,
+            end_ordinal=2,
         )
         old_elements = [t1, t2]
         e_new = EventTrigger()
@@ -204,8 +223,10 @@ class TestAddition:
         t1 = TranslationTarget()
         t2 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=1, end_ordinal=2,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=1,
+            end_ordinal=2,
         )
         old_elements = [t1, t2]
         r_new = RotationTarget()
@@ -221,14 +242,17 @@ class TestAddition:
 # Removal tests
 # ---------------------------------------------------------------------------
 
+
 class TestRemoval:
     def test_remove_before_range_shifts_backward(self):
         t1 = TranslationTarget()
         t2 = TranslationTarget()
         t3 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=2, end_ordinal=3,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=2,
+            end_ordinal=3,
         )
         old_elements = [t1, t2, t3]
         path = _make_path(t2, t3, constraints=[rc])
@@ -244,8 +268,10 @@ class TestRemoval:
         t2 = TranslationTarget()
         t3 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=1, end_ordinal=3,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=1,
+            end_ordinal=3,
         )
         old_elements = [t1, t2, t3]
         # Remove t1
@@ -263,8 +289,10 @@ class TestRemoval:
         t2 = TranslationTarget()
         t3 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=1, end_ordinal=3,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=1,
+            end_ordinal=3,
         )
         old_elements = [t1, t2, t3]
         # Remove t3
@@ -281,8 +309,10 @@ class TestRemoval:
         t2 = TranslationTarget()
         t3 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=1, end_ordinal=3,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=1,
+            end_ordinal=3,
         )
         old_elements = [t1, t2, t3]
         # Remove t1 and t3, keep t2
@@ -300,8 +330,10 @@ class TestRemoval:
         t2 = TranslationTarget()
         t3 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=1, end_ordinal=2,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=1,
+            end_ordinal=2,
         )
         old_elements = [t1, t2, t3]
         # Remove t1 and t2, keep t3 (outside the range)
@@ -315,8 +347,10 @@ class TestRemoval:
         """If the entire domain is empty, all constraints in that domain are dropped."""
         t1 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=1, end_ordinal=1,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=1,
+            end_ordinal=1,
         )
         old_elements = [t1]
         # Only a RotationTarget remains (not in translation domain)
@@ -359,6 +393,7 @@ class TestRemoval:
 # Reorder tests
 # ---------------------------------------------------------------------------
 
+
 class TestReorder:
     def test_swap_two_elements(self):
         """Swapping two elements should remap ordinals by identity."""
@@ -366,8 +401,10 @@ class TestReorder:
         t2 = TranslationTarget()
         t3 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=1, end_ordinal=2,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=1,
+            end_ordinal=2,
         )
         old_elements = [t1, t2, t3]
         # Swap t1 and t3
@@ -385,8 +422,10 @@ class TestReorder:
         t1 = TranslationTarget()
         t2 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_acceleration_meters_per_sec2", value=5.0,
-            start_ordinal=1, end_ordinal=2,
+            key="max_acceleration_meters_per_sec2",
+            value=5.0,
+            start_ordinal=1,
+            end_ordinal=2,
         )
         old_elements = [t1, t2]
         path = _make_path(t2, t1, constraints=[rc])
@@ -404,8 +443,10 @@ class TestReorder:
         r1 = RotationTarget()
         t2 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=1, end_ordinal=2,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=1,
+            end_ordinal=2,
         )
         old_elements = [t1, r1, t2]
         # Reverse: t2, r1, t1
@@ -424,6 +465,7 @@ class TestReorder:
 # Type change tests
 # ---------------------------------------------------------------------------
 
+
 class TestTypeChange:
     def test_translation_to_rotation_removes_from_translation_domain(self):
         """When a TranslationTarget becomes a RotationTarget, it leaves the
@@ -432,8 +474,10 @@ class TestTypeChange:
         t2 = TranslationTarget()
         t3 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=1, end_ordinal=3,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=1,
+            end_ordinal=3,
         )
         old_elements = [t1, t2, t3]
         # t2 changed to RotationTarget (new object at same position)
@@ -452,8 +496,10 @@ class TestTypeChange:
         t1 = TranslationTarget()
         t2 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=1, end_ordinal=2,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=1,
+            end_ordinal=2,
         )
         old_elements = [t1, t2]
         # t1 replaced by RotationTarget
@@ -474,8 +520,10 @@ class TestTypeChange:
         r1 = RotationTarget()
         t1 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_deg_per_sec", value=100.0,
-            start_ordinal=1, end_ordinal=2,
+            key="max_velocity_deg_per_sec",
+            value=100.0,
+            start_ordinal=1,
+            end_ordinal=2,
         )
         old_elements = [w1, r1, t1]
         # t1 changes to RotationTarget -> now in rotation domain
@@ -522,6 +570,7 @@ class TestTypeChange:
 # Edge cases
 # ---------------------------------------------------------------------------
 
+
 class TestEdgeCases:
     def test_no_ranged_constraints_is_noop(self):
         t1 = TranslationTarget()
@@ -539,12 +588,16 @@ class TestEdgeCases:
         t2 = TranslationTarget()
         t3 = TranslationTarget()
         rc1 = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=1, end_ordinal=2,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=1,
+            end_ordinal=2,
         )
         rc2 = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=2.0,
-            start_ordinal=2, end_ordinal=3,
+            key="max_velocity_meters_per_sec",
+            value=2.0,
+            start_ordinal=2,
+            end_ordinal=3,
         )
         old_elements = [t1, t2, t3]
         # Remove t1
@@ -564,8 +617,10 @@ class TestEdgeCases:
         """Ordinal beyond old domain size is treated as None (endpoint removed)."""
         t1 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=5, end_ordinal=1,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=5,
+            end_ordinal=1,
         )
         old_elements = [t1]
         t2 = TranslationTarget()
@@ -583,12 +638,16 @@ class TestEdgeCases:
         w1 = Waypoint()
         w2 = Waypoint()
         rc_trans = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=1, end_ordinal=2,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=1,
+            end_ordinal=2,
         )
         rc_rot = RangedConstraint(
-            key="max_velocity_deg_per_sec", value=100.0,
-            start_ordinal=1, end_ordinal=2,
+            key="max_velocity_deg_per_sec",
+            value=100.0,
+            start_ordinal=1,
+            end_ordinal=2,
         )
         old_elements = [w1, w2]
         w_new = Waypoint()
@@ -608,8 +667,10 @@ class TestEdgeCases:
         t1 = TranslationTarget()
         t2 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=2, end_ordinal=2,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=2,
+            end_ordinal=2,
         )
         old_elements = [t1, t2]
         # Remove t1 only
@@ -626,8 +687,10 @@ class TestEdgeCases:
         t1 = TranslationTarget()
         t2 = TranslationTarget()
         rc = RangedConstraint(
-            key="max_velocity_meters_per_sec", value=1.0,
-            start_ordinal=1, end_ordinal=1,
+            key="max_velocity_meters_per_sec",
+            value=1.0,
+            start_ordinal=1,
+            end_ordinal=1,
         )
         old_elements = [t1, t2]
         # Remove t1
@@ -642,8 +705,10 @@ class TestEdgeCases:
         r1 = RotationTarget()
         w1 = Waypoint()
         rc = RangedConstraint(
-            key="max_velocity_deg_per_sec", value=50.0,
-            start_ordinal=1, end_ordinal=2,
+            key="max_velocity_deg_per_sec",
+            value=50.0,
+            start_ordinal=1,
+            end_ordinal=2,
         )
         old_elements = [r1, w1]
         e_new = EventTrigger()

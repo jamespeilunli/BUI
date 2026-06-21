@@ -153,8 +153,8 @@ def build_menu_bar(window: "MainWindow") -> None:
     for action, mode in simulated_path_actions:
         action.setCheckable(True)
         action.triggered.connect(
-            lambda checked=False, selected_mode=mode: window._action_set_simulated_path_display_mode(
-                selected_mode
+            lambda checked=False, selected_mode=mode: (
+                window._action_set_simulated_path_display_mode(selected_mode)
             )
         )
         window.action_group_simulated_path.addAction(action)
