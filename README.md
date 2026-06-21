@@ -86,7 +86,7 @@ The required test command for this repo is:
 uv run pytest
 ```
 
-Read `AGENTS.md`, `docs/DESIGN.md`, and `docs/DEVELOPMENT.md` before making UI changes.
+Read `AGENTS.md` before making changes.
 
 ## Project Layout
 
