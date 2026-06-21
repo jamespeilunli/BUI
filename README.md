@@ -86,7 +86,7 @@ The required test command for this repo is:
 uv run pytest
 ```
 
-Read `AGENTS.md` and the docs in `docs/` before making UI changes.
+Read `AGENTS.md`, `docs/DESIGN.md`, and `docs/DEVELOPMENT.md` before making UI changes.
 
 ## Project Layout
 
@@ -97,7 +97,7 @@ Read `AGENTS.md` and the docs in `docs/` before making UI changes.
 - `ui/sidebar/` - Property inspector and exact-value controls.
 - `ui/main_window/` - Three-region shell, menus, autosave, undo/redo, and cross-region wiring.
 - `utils/` - Project persistence, path/config IO, settings, and undo commands.
-- `docs/` - Redesign, PySide6, implementation, and upstream sync notes.
+- `docs/` - Design principles, architecture context, and upstream sync notes.
 - `tests/` - Unit and integration tests for model, IO, timeline, sidebar, canvas, and main-window behavior.
 - `packaging/` - Build scripts and PyInstaller/Inno/AppImage packaging files.
 
