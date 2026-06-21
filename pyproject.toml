@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "bui"
 version = "0.5.0-beta.5"
 description = "A PySide6 GUI for planning and simulating FRC robot paths."
-readme = "README.md"
+readme = "docs/README.md"
 requires-python = ">=3.11"
 authors = [{ name = "FRC PTP Maintainers" }]
 dependencies = [
