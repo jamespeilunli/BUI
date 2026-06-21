@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 
 import pytest
+from PySide6.QtCore import QByteArray
 from PySide6.QtWidgets import QDialog
 
 from models.path_model import (
@@ -52,6 +53,41 @@ def _simple_path() -> Path:
             TranslationTarget(4.0, 0.0),
         ]
     )
+
+
+def test_main_window_restores_saved_geometry_on_startup(qt_app, monkeypatch):
+    saved_geometry = QByteArray(b"saved-window-geometry")
+    restored: list[bytes] = []
+
+    class SeededSettings(DummySettings):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._store[ProjectManager.KEY_MAIN_WINDOW_GEOMETRY] = saved_geometry
+
+    def record_restore_geometry(self, geometry):
+        restored.append(bytes(geometry))
+        return True
+
+    monkeypatch.setattr("utils.project_manager.QSettings", SeededSettings)
+    monkeypatch.setattr(MainWindow, "restoreGeometry", record_restore_geometry)
+
+    window = _new_window()
+    try:
+        assert restored == [bytes(saved_geometry)]
+    finally:
+        window.close()
+
+
+def test_main_window_persists_geometry_on_close(qt_app):
+    settings = DummySettings()
+    window = _new_window()
+    window.project_manager.settings = settings
+
+    window.close()
+
+    saved = settings.value(ProjectManager.KEY_MAIN_WINDOW_GEOMETRY)
+    assert isinstance(saved, QByteArray)
+    assert not saved.isEmpty()
 
 
 def test_main_window_places_timeline_full_width_below_top_editor(qt_app, process_events):

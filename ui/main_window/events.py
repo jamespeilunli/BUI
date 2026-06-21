@@ -78,3 +78,10 @@ class WindowEventMixin:
     def showEvent(self: "MainWindow", event):
         super().showEvent(event)
         QTimer.singleShot(0, self.sidebar.mark_ready)
+
+    def closeEvent(self: "MainWindow", event):
+        try:
+            self.project_manager.set_main_window_geometry(self.saveGeometry())
+        except Exception:
+            pass
+        super().closeEvent(event)

@@ -130,6 +130,7 @@ Examples:
 - last selected project directory
 - last opened path filename
 - recent project list
+- main window geometry
 - simulated path display mode
 
 `ProjectManager` should own QSettings keys when practical. Avoid scattering raw settings keys

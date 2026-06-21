@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QByteArray, QSettings
 
 from models.path_model import Path
 from utils.project_io import create_example_paths, deserialize_path, serialize_path
@@ -407,6 +407,7 @@ class ProjectManager:
     KEY_LAST_PATH_FILE = "project/last_path_file"
     KEY_RECENT_PROJECTS = "project/recent_projects"
     KEY_SIMULATED_PATH_DISPLAY_MODE = "view/simulated_path_display_mode"
+    KEY_MAIN_WINDOW_GEOMETRY = "view/main_window_geometry"
     SIMULATED_PATH_DISPLAY_MODES = {"hidden", "to_current_time", "complete"}
     DEFAULT_SIMULATED_PATH_DISPLAY_MODE = "to_current_time"
 
@@ -555,6 +556,24 @@ class ProjectManager:
             return
         try:
             self.settings.setValue(self.KEY_SIMULATED_PATH_DISPLAY_MODE, normalized)
+        except Exception:
+            pass
+
+    def main_window_geometry(self) -> Optional[QByteArray]:
+        raw = self.settings.value(self.KEY_MAIN_WINDOW_GEOMETRY)
+        if isinstance(raw, QByteArray):
+            return raw if not raw.isEmpty() else None
+        if isinstance(raw, (bytes, bytearray)):
+            geometry = QByteArray(bytes(raw))
+            return geometry if not geometry.isEmpty() else None
+        return None
+
+    def set_main_window_geometry(self, geometry: QByteArray | bytes | bytearray) -> None:
+        try:
+            value = geometry if isinstance(geometry, QByteArray) else QByteArray(bytes(geometry))
+            if value.isEmpty():
+                return
+            self.settings.setValue(self.KEY_MAIN_WINDOW_GEOMETRY, value)
         except Exception:
             pass
 

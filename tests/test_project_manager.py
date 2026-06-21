@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from PySide6.QtCore import QByteArray
+
 from models.path_model import Path as PathModel, TranslationTarget
 from utils.project_manager import ProjectConfig, ProjectManager
 
@@ -128,3 +130,16 @@ def test_project_manager_persists_simulated_path_display_mode():
     pm.settings.setValue(ProjectManager.KEY_SIMULATED_PATH_DISPLAY_MODE, "unsupported")
 
     assert pm.simulated_path_display_mode() == "to_current_time"
+
+
+def test_project_manager_persists_main_window_geometry():
+    pm = ProjectManager()
+    pm.settings = DummySettings()
+    geometry = QByteArray(b"qt-window-geometry")
+
+    pm.set_main_window_geometry(geometry)
+
+    restored = pm.main_window_geometry()
+    assert restored is not None
+    assert bytes(restored) == b"qt-window-geometry"
+    assert pm.settings.value(ProjectManager.KEY_MAIN_WINDOW_GEOMETRY) == geometry

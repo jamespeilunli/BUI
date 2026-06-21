@@ -70,6 +70,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
         except Exception:
             pass
         self.project_manager = ProjectManager()
+        self._restore_saved_window_geometry()
         self.path = Path()  # start empty; will be replaced on project load
 
         # Initialize undo/redo system
@@ -382,6 +383,14 @@ class MainWindow(WindowEventMixin, QMainWindow):
             self.workspace_splitter.setStretchFactor(1, 0)
             self.editor_splitter.setStretchFactor(0, 1)
             self.editor_splitter.setStretchFactor(1, 0)
+        except Exception:
+            pass
+
+    def _restore_saved_window_geometry(self) -> None:
+        try:
+            geometry = self.project_manager.main_window_geometry()
+            if geometry is not None:
+                self.restoreGeometry(geometry)
         except Exception:
             pass
 
