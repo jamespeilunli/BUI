@@ -43,12 +43,6 @@ uv sync
 uv run main.py
 ```
 
-Or use the helper script:
-
-```bash
-./scripts/dev_env.sh
-```
-
 ### As a Python Package
 
 When installed as a package, the application entry point is `bui`:
