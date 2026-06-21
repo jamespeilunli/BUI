@@ -108,11 +108,6 @@ Read `AGENTS.md` and the docs in `docs/` before making UI changes.
 - `tests/` - Unit and integration tests for model, IO, timeline, sidebar, canvas, and main-window behavior.
 - `packaging/` - Build scripts and PyInstaller/Inno/AppImage packaging files.
 
-## Upstream
-
-BUI is forked from the original BLine-GUI project. Upstream sync notes live in
-`docs/UPSTREAM_SYNC.md`.
-
 ## License
 
 BSD 3-Clause License. See [LICENSE](LICENSE).
