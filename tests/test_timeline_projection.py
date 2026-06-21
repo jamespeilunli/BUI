@@ -11,7 +11,7 @@ from models.path_model import (
     TranslationTarget,
     Waypoint,
 )
-from ui.timeline.placeholder import (
+from ui.timeline.dock import (
     HEADER_WIDTH,
     ROTATION_CONSTRAINT_ROW_TITLE,
     TIMELINE_MAX_TIME_S,
@@ -86,7 +86,7 @@ def test_projection_uses_simulation_time_when_available(monkeypatch):
             progress_by_time={0.0: 0.0, 2.0: 2.0, 10.0: 6.0},
         )
 
-    monkeypatch.setattr("ui.timeline.placeholder.simulate_path", fake_simulate_path)
+    monkeypatch.setattr("ui.timeline.dock.simulate_path", fake_simulate_path)
 
     projection = _build_projection(_axis_path(), {}, use_sim_time=True)
     structure = next(row for row in projection.rows if row.title == "Structure")
@@ -104,7 +104,7 @@ def test_projection_uses_simulation_time_when_available(monkeypatch):
 
 def test_projection_falls_back_when_simulation_samples_are_unusable(monkeypatch):
     monkeypatch.setattr(
-        "ui.timeline.placeholder.simulate_path",
+        "ui.timeline.dock.simulate_path",
         lambda path, config, dt_s: SimpleNamespace(
             times_sorted=[0.0],
             poses_by_time={},

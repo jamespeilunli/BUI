@@ -1,5 +1,5 @@
 # mypy: ignore-errors
-"""Timeline dock for the redesign rollout."""
+"""Timeline dock and projection helpers."""
 
 from __future__ import annotations
 
@@ -2829,10 +2829,6 @@ class TimelineDock(QFrame):
             hbar.setValue(int(round(playhead_x - margin)))
         elif playhead_x > visible_right - margin:
             hbar.setValue(int(round(playhead_x - viewport_width + margin)))
-
-
-TimelinePlaceholder = TimelineDock
-
 
 def _build_projection(
     path: Path,

@@ -12,7 +12,7 @@ from models.path_model import (
     TranslationTarget,
     Waypoint,
 )
-from ui.timeline.placeholder import (
+from ui.timeline.dock import (
     ROTATION_CONSTRAINT_ROW_TITLE,
     TimelineDock,
     TRANSLATION_CONSTRAINT_ROW_TITLE,

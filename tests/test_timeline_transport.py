@@ -5,7 +5,7 @@ from PySide6.QtCore import QEvent, QPoint, QPointF
 
 from models.path_model import Path, RangedConstraint, TranslationTarget
 from ui.qt_compat import Qt
-from ui.timeline.placeholder import (
+from ui.timeline.dock import (
     MAX_ZOOM_PX_PER_M,
     MIN_ZOOM_PX_PER_M,
     PLAYBACK_STEP_S,

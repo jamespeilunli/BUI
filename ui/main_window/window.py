@@ -40,8 +40,8 @@ from models.path_model import (
     Waypoint,
 )
 from ..canvas import CanvasView, FIELD_LENGTH_METERS, FIELD_WIDTH_METERS
-from ..timeline import TimelinePlaceholder
-from ..timeline.placeholder import (
+from ..timeline import (
+    TimelineDock,
     resolve_structure_placement_for_time,
     resolve_trigger_placement_for_time,
 )
@@ -119,7 +119,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
         self.editor_splitter.addWidget(self.sidebar)
 
         # Timeline dock shell (full-width bottom)
-        self.timeline = TimelinePlaceholder(self.path, None)
+        self.timeline = TimelineDock(self.path, None)
         self.workspace_splitter.addWidget(self.timeline)
 
         self._configure_splitters()

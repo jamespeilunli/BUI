@@ -27,7 +27,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["models", "ui", "ui.canvas", "ui.canvas.items", "ui.canvas.components", "ui.main_window", "ui.resources", "ui.sidebar", "ui.sidebar.components", "ui.sidebar.mixins", "ui.sidebar.utils", "ui.sidebar.widgets", "utils"]
+packages = ["models", "ui", "ui.canvas", "ui.canvas.items", "ui.canvas.components", "ui.main_window", "ui.resources", "ui.sidebar", "ui.sidebar.components", "ui.sidebar.mixins", "ui.sidebar.utils", "ui.sidebar.widgets", "ui.timeline", "utils"]
 py-modules = ["main", "assets_rc"]
 include-package-data = true
 

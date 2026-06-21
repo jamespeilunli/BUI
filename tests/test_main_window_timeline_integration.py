@@ -15,7 +15,7 @@ from models.path_model import (
 )
 from ui.main_window.window import MainWindow
 from ui.qt_compat import Qt
-from ui.timeline.placeholder import StructurePlacement, TriggerPlacement
+from ui.timeline import StructurePlacement, TriggerPlacement
 from utils.project_manager import ProjectManager
 
 

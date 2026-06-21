@@ -66,7 +66,7 @@ Core areas:
 - `ui/canvas/view.py`: field canvas, graphics scene, geometry editing, simulation preview.
 - `ui/canvas/items/elements.py`: custom path-element graphics items.
 - `ui/canvas/items/sim.py`: simulated robot/path visuals.
-- `ui/timeline/placeholder.py`: timeline dock, projection, transport, zoom/scroll, editing.
+- `ui/timeline/dock.py`: timeline dock, projection, transport, zoom/scroll, editing.
 - `ui/sidebar/sidebar.py`: property sidebar and exact-value editing orchestration.
 - `ui/sidebar/components/property_editor.py`: element property controls.
 - `ui/sidebar/components/constraint_manager.py`: constraint controls, ranged bars, popout sync.
@@ -518,4 +518,3 @@ Manual checks for non-trivial UI changes:
 - window resize/fullscreen transitions do not break selection or layout
 
 Docs-only changes do not require app tests.
-
