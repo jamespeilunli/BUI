@@ -2,6 +2,8 @@
 
 BUI is a timeline-based fork of [BLine-GUI](https://github.com/edanliahovetsky/BLine-GUI), the desktop editor for creating BLine autonomous paths for holonomic FRC drivetrains.
 
+BUI is designed to be fully compatible with the files [BLine-Lib](https://github.com/edanliahovetsky/BLine-Lib) expects. You can switch to BUI from BLine-GUI immediately for any BLine codebase.
+
 The field canvas remains the geometric editor, the right sidebar remains the detailed inspector, and the bottom timeline is the main surface for sequence, timing, event triggers, playback, scrubbing, and ranged constraints.
 
 📚 **[Original BLine Documentation](https://edanliahovetsky.github.io/BLine-Docs/)** — path concepts, robot-side usage, and reference.
@@ -22,10 +24,6 @@ BUI keeps BLine-GUI's canvas editor and adds a video-editor-style timeline:
 - Path structure, event triggers, and ranged constraints are visible in sequence.
 - Event triggers and ranged constraints can be edited directly from the timeline.
 - Selection sync between the canvas, timeline, and sidebar.
-
-## Compatibility
-
-You can switch to BUI from BLine-GUI immediately for any BLine codebase.
 
 ## Installation
 
