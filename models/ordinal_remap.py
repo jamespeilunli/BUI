@@ -8,16 +8,20 @@ from models.path_model import (
 )
 from typing import List
 
+
 def _translation_domain(elements: List[PathElement]) -> List[int]:
     """Return Python id()s of elements in the translation domain, in order."""
     return [id(e) for e in elements if isinstance(e, (TranslationTarget, Waypoint))]
+
 
 def _rotation_domain(elements: List[PathElement]) -> List[int]:
     """Return Python id()s of elements in the rotation domain, in order."""
     return [id(e) for e in elements if isinstance(e, (Waypoint, RotationTarget))]
 
+
 TRANSLATION_KEYS = {"max_velocity_meters_per_sec", "max_acceleration_meters_per_sec2"}
 ROTATION_KEYS = {"max_velocity_deg_per_sec", "max_acceleration_deg_per_sec2"}
+
 
 def _domain_for_key(key: str, elements: List[PathElement]) -> List[int]:
     if key in TRANSLATION_KEYS:
@@ -62,15 +66,9 @@ def _surviving_ordinals_for_range(
     if start > end:
         start, end = end, start
     old_range_ids = {
-        old_domain[ord_i - 1]
-        for ord_i in range(start, end + 1)
-        if 0 <= ord_i - 1 < len(old_domain)
+        old_domain[ord_i - 1] for ord_i in range(start, end + 1) if 0 <= ord_i - 1 < len(old_domain)
     }
-    return sorted(
-        new_id_to_ordinal[eid]
-        for eid in old_range_ids
-        if eid in new_id_to_ordinal
-    )
+    return sorted(new_id_to_ordinal[eid] for eid in old_range_ids if eid in new_id_to_ordinal)
 
 
 def remap_ranged_constraints(path: Path, old_elements: List[PathElement]) -> None:
@@ -132,8 +130,7 @@ def remap_ranged_constraints(path: Path, old_elements: List[PathElement]) -> Non
             if remapped_start > remapped_end:
                 remapped_start, remapped_end = remapped_end, remapped_start
             if surviving_ordinals and (
-                min(surviving_ordinals) < remapped_start
-                or max(surviving_ordinals) > remapped_end
+                min(surviving_ordinals) < remapped_start or max(surviving_ordinals) > remapped_end
             ):
                 remapped_start = surviving_ordinals[0]
                 remapped_end = surviving_ordinals[-1]

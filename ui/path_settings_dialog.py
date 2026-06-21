@@ -186,7 +186,9 @@ class PathSettingsDialog(QDialog):
         spin = self._make_spinbox(key)
         existing_value = self._current_constraint_value(key)
         check.setChecked(existing_value is not None)
-        spin.setValue(float(existing_value if existing_value is not None else self._default_value(key)))
+        spin.setValue(
+            float(existing_value if existing_value is not None else self._default_value(key))
+        )
         spin.setEnabled(existing_value is not None)
         try:
             label.setMinimumWidth(250)
@@ -295,7 +297,10 @@ class PathSettingsDialog(QDialog):
         clamped_count = 0
         for rc in getattr(self._path, "ranged_constraints", []) or []:
             try:
-                if getattr(rc, "key", None) == key and float(getattr(rc, "value", 0.0)) > flat_value:
+                if (
+                    getattr(rc, "key", None) == key
+                    and float(getattr(rc, "value", 0.0)) > flat_value
+                ):
                     clamped_count += 1
             except Exception:
                 continue

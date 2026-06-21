@@ -39,10 +39,8 @@ This repo uses Python 3.11+ and PySide6.
 ```bash
 git clone https://github.com/jamespeilunli/BUI.git
 cd BUI
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python3 main.py
+uv sync
+uv run main.py
 ```
 
 Or use the helper script:
@@ -56,7 +54,7 @@ Or use the helper script:
 When installed as a package, the application entry point is `bui`:
 
 ```bash
-pipx install git+https://github.com/jamespeilunli/BUI.git
+uv tool install git+https://github.com/jamespeilunli/BUI.git
 bui
 ```
 
@@ -68,7 +66,7 @@ bui --create-shortcut
 
 ## Quick Start
 
-1. Launch `bui` or run `python3 main.py` from the repo.
+1. Launch `bui` or run `uv run main.py` from the repo.
 2. Open an FRC project or autos project directory.
 3. Edit path geometry on the field canvas.
 4. Use the bottom timeline to inspect path order, scrub playback, place triggers, and edit ranged
@@ -80,17 +78,18 @@ bui --create-shortcut
 Common commands:
 
 ```bash
-make install
-make run
-make fmt
-make lint
-make test
+uv sync
+uv run main.py
+uv run ruff format
+uv run ruff check
+uv run mypy
+uv run pytest
 ```
 
 The required test command for this repo is:
 
 ```bash
-uv run python3 -m pytest
+uv run pytest
 ```
 
 Read `AGENTS.md` and the docs in `docs/` before making UI changes.

@@ -6,6 +6,6 @@ Notes
 
 - The user is very sensitive to visual correctness and alignment. They specifically care that positions, bars, playback, and navigation feel exact and intuitive. Small offsets and rough behavior are likely to be noticed and called out. UI/UX should be the number one priority.
 - Carefully read and respect the following docs before beginning development: docs/PYSIDE6_DEVELOPMENT.md, docs/design.md, docs/ui-spec.md, and docs/tasks.md.
-- Validate every distinct function or feature with unit tests. Run tests using `uv run python3 -m pytest`
+- Validate every distinct function or feature with unit tests. Run tests using `uv run pytest`
 - There is no `python`, there is `python3`
 - For original BLine-GUI upstream sync context, read and update `docs/UPSTREAM_SYNC.md` every time upstream changes are reviewed or ported.

@@ -160,15 +160,19 @@ RANGED_CONSTRAINT_KEYS = [
 ]
 
 # Constraint keys in the translation domain (TranslationTarget + Waypoint)
-TRANSLATION_CONSTRAINT_KEYS = frozenset({
-    "max_velocity_meters_per_sec",
-    "max_acceleration_meters_per_sec2",
-})
+TRANSLATION_CONSTRAINT_KEYS = frozenset(
+    {
+        "max_velocity_meters_per_sec",
+        "max_acceleration_meters_per_sec2",
+    }
+)
 
-ROTATION_CONSTRAINT_KEYS = frozenset({
-    "max_velocity_deg_per_sec",
-    "max_acceleration_deg_per_sec2",
-})
+ROTATION_CONSTRAINT_KEYS = frozenset(
+    {
+        "max_velocity_deg_per_sec",
+        "max_acceleration_deg_per_sec2",
+    }
+)
 
 
 def _extract_unit(label: str) -> str:
@@ -177,11 +181,12 @@ def _extract_unit(label: str) -> str:
     Returns empty string for non-unit parenthetical info (e.g. '(0-1)').
     """
     import re
-    m = re.search(r'\(([^)]+)\)\s*$', label.replace("<br/>", " "))
+
+    m = re.search(r"\(([^)]+)\)\s*$", label.replace("<br/>", " "))
     if m:
         unit = m.group(1)
         # Skip range indicators like "0-1" — those aren't units
-        if re.fullmatch(r'[\d.\-–]+', unit):
+        if re.fullmatch(r"[\d.\-–]+", unit):
             return ""
         return " " + unit
     return ""

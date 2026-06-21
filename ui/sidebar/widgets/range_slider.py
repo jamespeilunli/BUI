@@ -312,7 +312,9 @@ class RangeSlider(QWidget):
         for handle_name, hx in [("low", x1), ("high", x2)]:
             is_dragged = self._dragging == handle_name
             is_hovered = self._hovered_handle == handle_name and self._dragging is None
-            is_focused_kb = self.hasFocus() and self._focused_handle == handle_name and self._dragging is None
+            is_focused_kb = (
+                self.hasFocus() and self._focused_handle == handle_name and self._dragging is None
+            )
 
             if is_blocked and is_dragged:
                 fill = QColor("#cc3333")

@@ -243,9 +243,7 @@ class ConstraintPopout(QWidget):
     # Domain helpers
     # ------------------------------------------------------------------
 
-    def _build_segments_for_key(
-        self, key: str
-    ) -> Tuple[List[SegmentData], list]:
+    def _build_segments_for_key(self, key: str) -> Tuple[List[SegmentData], list]:
         """Build SegmentData list and sorted ranged constraint list for a key."""
         from models.path_model import RangedConstraint  # noqa: F811
 
@@ -254,10 +252,7 @@ class ConstraintPopout(QWidget):
         ]
         ranged.sort(key=lambda rc: rc.start_ordinal)
         color = SEGMENT_COLORS.get(key, QColor("#666666"))
-        segments = [
-            SegmentData(rc.start_ordinal, rc.end_ordinal, rc.value, color)
-            for rc in ranged
-        ]
+        segments = [SegmentData(rc.start_ordinal, rc.end_ordinal, rc.value, color) for rc in ranged]
         return segments, ranged
 
     # ------------------------------------------------------------------
@@ -354,20 +349,14 @@ class ConstraintPopout(QWidget):
         bar.segmentBoundaryDragged.connect(
             lambda idx, s, e, k=key: self._on_boundary_dragged(k, idx, s, e)
         )
-        bar.segmentBoundaryDragFinished.connect(
-            lambda k=key: self._on_boundary_drag_finished(k)
-        )
-        bar.segmentMoved.connect(
-            lambda idx, s, e, k=key: self._on_segment_moved(k, idx, s, e)
-        )
+        bar.segmentBoundaryDragFinished.connect(lambda k=key: self._on_boundary_drag_finished(k))
+        bar.segmentMoved.connect(lambda idx, s, e, k=key: self._on_segment_moved(k, idx, s, e))
         bar.adjacentBoundaryDragged.connect(
             lambda a_idx, a_s, a_e, b_idx, b_s, b_e, k=key: self._on_adjacent_boundary_dragged(
                 k, a_idx, a_s, a_e, b_idx, b_s, b_e
             )
         )
-        bar.gapDoubleClicked.connect(
-            lambda s, e, k=key: self._on_gap_double_clicked(k, s, e)
-        )
+        bar.gapDoubleClicked.connect(lambda s, e, k=key: self._on_gap_double_clicked(k, s, e))
         bar.deleteRequested.connect(lambda idx, k=key: self._on_delete(k, idx))
         bar.splitRequested.connect(lambda idx, k=key: self._on_split(k, idx))
 

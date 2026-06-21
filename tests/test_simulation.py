@@ -4,7 +4,13 @@ import math
 
 import pytest
 
-from models.path_model import EventTrigger, Path, RangedConstraint, RotationTarget, TranslationTarget
+from models.path_model import (
+    EventTrigger,
+    Path,
+    RangedConstraint,
+    RotationTarget,
+    TranslationTarget,
+)
 from models.simulation import (
     ChassisSpeeds,
     _active_rotation_limit,

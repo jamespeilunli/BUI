@@ -528,11 +528,7 @@ class MainWindow(WindowEventMixin, QMainWindow):
         structure_changed = bool(self.sidebar._check_and_swap_rotation_targets())
         new_identity = id(new_element)
         new_index = next(
-            (
-                i
-                for i, element in enumerate(self.path.path_elements)
-                if id(element) == new_identity
-            ),
+            (i for i, element in enumerate(self.path.path_elements) if id(element) == new_identity),
             insert_index,
         )
 
@@ -601,7 +597,11 @@ class MainWindow(WindowEventMixin, QMainWindow):
         self.path.path_elements.insert(insert_index, new_trigger)
         structure_changed = bool(self.sidebar._check_and_swap_rotation_targets())
         new_index = next(
-            (i for i, element in enumerate(self.path.path_elements) if id(element) == id(new_trigger)),
+            (
+                i
+                for i, element in enumerate(self.path.path_elements)
+                if id(element) == id(new_trigger)
+            ),
             insert_index,
         )
 
@@ -662,7 +662,9 @@ class MainWindow(WindowEventMixin, QMainWindow):
         except Exception:
             return 0
 
-    def _normalized_constraint_range(self, key: str, start: int, end: int) -> tuple[int, int] | None:
+    def _normalized_constraint_range(
+        self, key: str, start: int, end: int
+    ) -> tuple[int, int] | None:
         total = self._constraint_domain_total(str(key))
         if total <= 0:
             return None

@@ -20,7 +20,12 @@ from PySide6.QtGui import QIcon
 
 from ui.qt_compat import Qt, QSizePolicy
 from models.path_model import TranslationTarget, RotationTarget, Waypoint, EventTrigger
-from ..utils import SPINNER_METADATA, SPINNER_UNITS, DEGREES_TO_RADIANS_ATTR_MAP, clamp_from_metadata
+from ..utils import (
+    SPINNER_METADATA,
+    SPINNER_UNITS,
+    DEGREES_TO_RADIANS_ATTR_MAP,
+    clamp_from_metadata,
+)
 from ..widgets import NoWheelDoubleSpinBox
 from ..utils.constants import NON_RANGED_CONSTRAINT_KEYS
 
@@ -458,7 +463,9 @@ class PropertyEditor(QObject):
             set_control_value("profiled_rotation", getattr(element, "profiled_rotation", True))
             set_control_value("rotation_position_ratio", float(getattr(element, "t_ratio", 0.0)))
         elif isinstance(element, EventTrigger):
-            set_control_value("event_trigger_position_ratio", float(getattr(element, "t_ratio", 0.0)))
+            set_control_value(
+                "event_trigger_position_ratio", float(getattr(element, "t_ratio", 0.0))
+            )
             set_control_value("event_trigger_lib_key", str(getattr(element, "lib_key", "")))
 
         # For waypoints, also reflect rotation ratio from the embedded rotation_target

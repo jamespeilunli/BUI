@@ -26,9 +26,7 @@ def get_constraint_domain_elements(path: Path | None, key: str) -> List[PathElem
         ]
 
     return [
-        element
-        for element in path.path_elements
-        if isinstance(element, (Waypoint, RotationTarget))
+        element for element in path.path_elements if isinstance(element, (Waypoint, RotationTarget))
     ]
 
 

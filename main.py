@@ -599,9 +599,7 @@ def run_app(argv: Sequence[str] | None = None) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="bui", description="BUI - FRC Robot Path Planning Tool"
-    )
+    parser = argparse.ArgumentParser(prog="bui", description="BUI - FRC Robot Path Planning Tool")
     parser.add_argument(
         "--create-shortcut",
         action="store_true",
