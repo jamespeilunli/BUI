@@ -4,7 +4,7 @@ BUI is a timeline-based fork of [BLine-GUI](https://github.com/edanliahovetsky/B
 
 BUI is designed to be fully compatible with the files [BLine-Lib](https://github.com/edanliahovetsky/BLine-Lib) expects. You can switch to BUI from BLine-GUI immediately for any BLine codebase.
 
-BUI is not affiliated with or endorsed by Rebel Robotics (FRC 2638) or the original BLine-GUI maintainers.
+BUI is not affiliated with or endorsed by Rebel Robotics (FRC 2638), the BLine-GUI maintainers, or the BLine-Lib maintainers.
 
 ![BUI Demo](assets/readme/demo.gif)
 
