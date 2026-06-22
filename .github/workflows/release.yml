@@ -12,6 +12,14 @@ on:
         required: false
         type: boolean
         default: false
+      release_mode:
+        description: 'Manual release mode'
+        required: false
+        type: choice
+        default: draft
+        options:
+          - draft
+          - publish
 
 jobs:
   check-release:
@@ -20,6 +28,7 @@ jobs:
       should_release: ${{ steps.check.outputs.should_release }}
       version: ${{ steps.get_version.outputs.version }}
       is_prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
+      draft_release: ${{ steps.release_mode.outputs.draft_release }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -37,6 +46,17 @@ jobs:
           else
             echo "should_release=false" >> $GITHUB_OUTPUT
             echo "No release triggered"
+          fi
+
+      - name: Resolve release mode
+        id: release_mode
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] && [[ "${{ github.event.inputs.release_mode }}" == "draft" ]]; then
+            echo "draft_release=true" >> $GITHUB_OUTPUT
+            echo "Manual draft release selected"
+          else
+            echo "draft_release=false" >> $GITHUB_OUTPUT
+            echo "Publishing release when release creation runs"
           fi
 
       - name: Get version from pyproject.toml
@@ -261,7 +281,7 @@ jobs:
             *Built automatically by GitHub Actions*
           files: |
             artifacts/*
-          draft: false
+          draft: ${{ needs.check-release.outputs.draft_release == 'true' }}
           prerelease: ${{ needs.check-release.outputs.is_prerelease == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

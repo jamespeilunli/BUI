@@ -2830,6 +2830,7 @@ class TimelineDock(QFrame):
         elif playhead_x > visible_right - margin:
             hbar.setValue(int(round(playhead_x - viewport_width + margin)))
 
+
 def _build_projection(
     path: Path,
     config: dict[str, object] | None = None,
