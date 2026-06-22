@@ -43,6 +43,8 @@ cp -r "${PROJECT_DIR}/ui" "${APPDIR}/usr/share/bui/"
 cp -r "${PROJECT_DIR}/utils" "${APPDIR}/usr/share/bui/"
 cp "${PROJECT_DIR}/main.py" "${APPDIR}/usr/share/bui/"
 cp "${PROJECT_DIR}/assets_rc.py" "${APPDIR}/usr/share/bui/"
+cp "${PROJECT_DIR}/LICENSE" "${APPDIR}/usr/share/bui/"
+cp "${PROJECT_DIR}/THIRD_PARTY_NOTICES.md" "${APPDIR}/usr/share/bui/"
 
 # Copy assets
 echo "Copying assets..."
@@ -95,7 +97,7 @@ cp "${SCRIPT_DIR}/bui.desktop" "${APPDIR}/"
 
 # Copy icon
 echo "Installing icon..."
-cp "${PROJECT_DIR}/assets/rebel_logo.png" "${APPDIR}/bui.png"
+cp "${PROJECT_DIR}/assets/bui_icon.png" "${APPDIR}/bui.png"
 
 # Download appimagetool if not present
 APPIMAGETOOL="${BUILD_DIR}/appimagetool-x86_64.AppImage"

@@ -3,7 +3,6 @@
         <file alias="field26.png">assets/field26.png</file>
         <file alias="add_icon.png">assets/add_icon.png</file>
         <file alias="remove_icon.png">assets/remove_icon.png</file>
-        <file alias="rebel_logo.png">assets/rebel_logo.png</file>
+        <file alias="bui_icon.png">assets/bui_icon.png</file>
     </qresource>
 </RCC>
-

@@ -6,8 +6,8 @@
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0"
 #endif
-#define MyAppPublisher "FRC Team 2638 Rebel Robotics"
-#define MyAppURL "https://github.com/2638/bui"
+#define MyAppPublisher "Peilun Li"
+#define MyAppURL "https://github.com/jamespeilunli/BUI"
 #define MyAppExeName "BUI.exe"
 
 [Setup]

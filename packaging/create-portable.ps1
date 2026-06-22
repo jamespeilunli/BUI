@@ -64,13 +64,13 @@ SYSTEM REQUIREMENTS:
 - No additional software needed (everything is bundled)
 
 SUPPORT:
-For issues, please visit: https://github.com/2638/bui/issues
+For issues, please visit: https://github.com/jamespeilunli/BUI/issues
 
 LICENSE:
 BUI is licensed under the BSD 3-Clause License.
-See LICENSE file for details.
+See LICENSE and THIRD_PARTY_NOTICES.md for details.
 
-Copyright (c) 2025 FRC Team 2638 Rebel Robotics
+Copyright (c) 2026 Peilun Li
 "@
 
 Set-Content -Path $ReadmePath -Value $ReadmeContent -Force
@@ -79,6 +79,11 @@ Set-Content -Path $ReadmePath -Value $ReadmeContent -Force
 $LicenseSrc = Join-Path $ProjectDir "LICENSE"
 if (Test-Path $LicenseSrc) {
     Copy-Item $LicenseSrc -Destination (Join-Path $DistDir "LICENSE") -Force
+}
+
+$NoticesSrc = Join-Path $ProjectDir "THIRD_PARTY_NOTICES.md"
+if (Test-Path $NoticesSrc) {
+    Copy-Item $NoticesSrc -Destination (Join-Path $DistDir "THIRD_PARTY_NOTICES.md") -Force
 }
 
 # Create the ZIP

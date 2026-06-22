@@ -1,6 +1,6 @@
 # BUI
 
-BUI is a timeline-based fork of [BLine-GUI](https://github.com/edanliahovetsky/BLine-GUI), the desktop editor for creating BLine autonomous paths for holonomic FRC drivetrains.
+BUI is a timeline-based fork of [BLine-GUI](https://github.com/edanliahovetsky/BLine-GUI), the desktop editor for creating BLine autonomous paths for holonomic FRC drivetrains. BUI is not affiliated with or endorsed by Rebel Robotics, FRC 2638, or the original BLine-GUI maintainers.
 
 BUI is designed to be fully compatible with the files [BLine-Lib](https://github.com/edanliahovetsky/BLine-Lib) expects. You can switch to BUI from BLine-GUI immediately for any BLine codebase.
 
@@ -103,4 +103,4 @@ Read `AGENTS.md` before making changes.
 
 ## License
 
-BSD 3-Clause License. See [LICENSE](LICENSE).
+BSD 3-Clause License. See [LICENSE](LICENSE). Third-party notices are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

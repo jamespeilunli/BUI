@@ -13,6 +13,8 @@ block_cipher = None
 # Collect all data files
 datas = [
     (str(assets_dir), 'assets'),
+    (str(project_dir / 'LICENSE'), '.'),
+    (str(project_dir / 'THIRD_PARTY_NOTICES.md'), '.'),
 ]
 
 # Hidden imports that PyInstaller might miss
@@ -59,7 +61,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(assets_dir / 'rebel_logo.png') if (assets_dir / 'rebel_logo.png').exists() else None,
+    icon=str(assets_dir / 'bui_icon.png') if (assets_dir / 'bui_icon.png').exists() else None,
 )
 
 coll = COLLECT(

@@ -46,9 +46,9 @@ def configure_application_identity(app: QApplication) -> None:
 def find_icon_path() -> Path | None:
     """Find the icon file, checking multiple possible locations."""
     possible_paths = [
-        get_package_root() / "assets" / "rebel_logo.png",  # Dev / source install
-        Path(sys.prefix) / "bui_assets" / "rebel_logo.png",  # Installed via pip
-        Path(__file__).parent.parent / "assets" / "rebel_logo.png",  # Alternate structure
+        get_package_root() / "assets" / "bui_icon.png",  # Dev / source install
+        Path(sys.prefix) / "bui_assets" / "bui_icon.png",  # Installed via pip
+        Path(__file__).parent.parent / "assets" / "bui_icon.png",  # Alternate structure
     ]
     for path in possible_paths:
         if path.exists():
@@ -215,7 +215,7 @@ def create_macos_app_bundle(
         "  <dict>",
         "    <key>CFBundleDevelopmentRegion</key><string>en</string>",
         "    <key>CFBundleExecutable</key><string>%s</string>" % app_name,
-        "    <key>CFBundleIdentifier</key><string>org.frc2638.bui</string>",
+        "    <key>CFBundleIdentifier</key><string>io.github.jamespeilunli.bui</string>",
         "    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>",
         "    <key>CFBundleName</key><string>%s</string>" % app_name,
         "    <key>CFBundlePackageType</key><string>APPL</string>",

@@ -35,9 +35,9 @@ echo "Cleaning previous build..."
 rm -rf "$BUILD_DIR" "$DIST_DIR"
 mkdir -p "$BUILD_DIR"
 
-# Generate .icns from rebel_logo.png
+# Generate .icns from the BUI icon.
 echo "Generating app icon..."
-LOGO_SRC="${PROJECT_DIR}/assets/rebel_logo.png"
+LOGO_SRC="${PROJECT_DIR}/assets/bui_icon.png"
 ICONSET_DIR="${BUILD_DIR}/BUI.iconset"
 ICNS_PATH="${BUILD_DIR}/BUI.icns"
 mkdir -p "$ICONSET_DIR"

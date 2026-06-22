@@ -2,6 +2,7 @@ BSD 3-Clause License
 
 Copyright (c) 2025, Edan Liahovetsky
 Copyright (c) 2025, Rebel Robotics (FRC 2638)
+Copyright (c) 2026, Peilun Li
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -36,6 +37,5 @@ This project incorporates limited portions of code from the following open-sourc
 - **PathPlanner**  
   Includes a copy of the field image asset.  
   © mjansen4857 / PathPlanner contributors.  
-  Licensed under the MIT License.  
+  Licensed under the MIT License. See `THIRD_PARTY_NOTICES.md`.  
   Source: <https://github.com/mjansen4857/pathplanner>
-

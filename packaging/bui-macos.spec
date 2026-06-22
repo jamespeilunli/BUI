@@ -12,7 +12,11 @@ a = Analysis(
     [str(project_dir / 'main.py')],
     pathex=[str(project_dir)],
     binaries=[],
-    datas=[(str(assets_dir), 'assets')],
+    datas=[
+        (str(assets_dir), 'assets'),
+        (str(project_dir / 'LICENSE'), '.'),
+        (str(project_dir / 'THIRD_PARTY_NOTICES.md'), '.'),
+    ],
     hiddenimports=[
         'PySide6.QtCore',
         'PySide6.QtGui',
@@ -64,5 +68,5 @@ app = BUNDLE(
     coll,
     name='BUI.app',
     icon=str(icns_path) if icns_path.exists() else None,
-    bundle_identifier='org.frc2638.bui',
+    bundle_identifier='io.github.jamespeilunli.bui',
 )

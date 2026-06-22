@@ -8,7 +8,7 @@ version = "0.5.0-beta.5"
 description = "A PySide6 GUI for planning and simulating FRC robot paths."
 readme = "README.md"
 requires-python = ">=3.11"
-authors = [{ name = "FRC PTP Maintainers" }]
+authors = [{ name = "Peilun Li" }]
 dependencies = [
     "PySide6>=6.6",
     "imageio>=2.0",

@@ -48,7 +48,7 @@ if (-not $SkipInstall) {
 }
 
 # Convert PNG icon to ICO if needed
-$IconPath = Join-Path $ProjectDir "assets\rebel_logo.png"
+$IconPath = Join-Path $ProjectDir "assets\bui_icon.png"
 $IcoPath = Join-Path $ScriptDir "bui.ico"
 
 Write-Host "Creating application icon..." -ForegroundColor Yellow
@@ -71,7 +71,7 @@ Set-Location $ScriptDir
 # Create updated spec file with icon
 $SpecContent = Get-Content "bui.spec" -Raw
 if (Test-Path $IcoPath) {
-    $SpecContent = $SpecContent -replace "icon=str\(assets_dir / 'rebel_logo\.png'\).*", "icon='$($IcoPath.Replace('\', '\\'))',"
+    $SpecContent = $SpecContent -replace "icon=str\(assets_dir / 'bui_icon\.png'\).*", "icon='$($IcoPath.Replace('\', '\\'))',"
     Set-Content -Path "bui.spec" -Value $SpecContent
 }
 
