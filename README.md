@@ -1,18 +1,17 @@
 # BUI
 
-BUI is a timeline-based fork of [BLine-GUI](https://github.com/edanliahovetsky/BLine-GUI), the desktop editor for creating BLine autonomous paths for holonomic FRC drivetrains. BUI is not affiliated with or endorsed by Rebel Robotics, FRC 2638, or the original BLine-GUI maintainers.
+BUI is a timeline-based fork of [BLine-GUI](https://github.com/edanliahovetsky/BLine-GUI), the desktop editor for creating BLine autonomous paths for holonomic FRC drivetrains.
 
 BUI is designed to be fully compatible with the files [BLine-Lib](https://github.com/edanliahovetsky/BLine-Lib) expects. You can switch to BUI from BLine-GUI immediately for any BLine codebase.
 
-The field canvas remains the geometric editor, the right sidebar remains the detailed inspector, and the bottom timeline is the main surface for sequence, timing, event triggers, playback, scrubbing, and ranged constraints.
+BUI is not affiliated with or endorsed by Rebel Robotics, FRC 2638, or the original BLine-GUI maintainers.
 
-📚 **[Original BLine Documentation](https://edanliahovetsky.github.io/BLine-Docs/)** — path concepts, robot-side usage, and reference.
+![BUI GUI Demo](assets/readme/gui_demo.gif)
 
-☕ **[BLine-Lib](https://github.com/edanliahovetsky/BLine-Lib)** — the BLine Java library.
+## Links
 
-![BLine GUI Demo](assets/readme/gui_demo.gif)
-
-![Robot Following BLine Path](assets/readme/cone-demo.gif)
+- **[Original BLine Documentation](https://edanliahovetsky.github.io/BLine-Docs/)** — path concepts, robot-side usage, and reference.
+- **[BLine-Lib](https://github.com/edanliahovetsky/BLine-Lib)** — the BLine Java library that does the path following.
 
 ## Timeline Workflow
 
