@@ -6,7 +6,7 @@ BUI is designed to be fully compatible with the files [BLine-Lib](https://github
 
 BUI is not affiliated with or endorsed by Rebel Robotics, FRC 2638, or the original BLine-GUI maintainers.
 
-![BUI GUI Demo](assets/readme/gui_demo.gif)
+![BUI Demo](assets/readme/demo.gif)
 
 ## Links
 
