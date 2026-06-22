@@ -116,7 +116,7 @@ def test_project_manager_persists_simulated_path_display_mode():
     pm = ProjectManager()
     pm.settings = DummySettings()
 
-    assert pm.simulated_path_display_mode() == "to_current_time"
+    assert pm.simulated_path_display_mode() == "complete"
 
     pm.set_simulated_path_display_mode("complete")
 
@@ -129,7 +129,7 @@ def test_project_manager_persists_simulated_path_display_mode():
 
     pm.settings.setValue(ProjectManager.KEY_SIMULATED_PATH_DISPLAY_MODE, "unsupported")
 
-    assert pm.simulated_path_display_mode() == "to_current_time"
+    assert pm.simulated_path_display_mode() == "complete"
 
 
 def test_project_manager_persists_main_window_geometry():

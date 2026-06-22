@@ -34,6 +34,7 @@ def test_simulated_path_to_current_time_tracks_playback_time(qt_app):
     canvas = CanvasView()
     try:
         _install_sim_samples(canvas)
+        canvas.set_simulated_path_display_mode("to_current_time")
         canvas._setup_trail([(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0)])
 
         assert canvas.simulated_path_display_mode() == "to_current_time"

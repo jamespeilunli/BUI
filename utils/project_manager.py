@@ -409,7 +409,7 @@ class ProjectManager:
     KEY_SIMULATED_PATH_DISPLAY_MODE = "view/simulated_path_display_mode"
     KEY_MAIN_WINDOW_GEOMETRY = "view/main_window_geometry"
     SIMULATED_PATH_DISPLAY_MODES = {"hidden", "to_current_time", "complete"}
-    DEFAULT_SIMULATED_PATH_DISPLAY_MODE = "to_current_time"
+    DEFAULT_SIMULATED_PATH_DISPLAY_MODE = "complete"
 
     def __init__(self):
         self.settings = QSettings(self.SETTINGS_ORG, self.SETTINGS_APP)

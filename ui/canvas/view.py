@@ -188,7 +188,7 @@ class CanvasView(QGraphicsView):
         self._trail_lines: List[QGraphicsLineItem] = []
         self._trail_points: List[Tuple[float, float]] = []
         self._trail_visible_count: int = 0
-        self._simulated_path_display_mode: str = "to_current_time"
+        self._simulated_path_display_mode: str = "complete"
         self._range_overlay_lines: List[QGraphicsLineItem] = []
         self._range_overlay_saved_item_styles: dict[QGraphicsItem, Tuple[QPen, QBrush]] = {}
         # Constraint popout sync state

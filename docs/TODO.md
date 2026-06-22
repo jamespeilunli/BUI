@@ -1,5 +1,5 @@
 - Indication of where the path ends on the timeline (not always last element because of rotation/translation tolerance). Fit should fit to this point
-- Ability to drag event markers and rotations anywhere on the path (automatically rearranges structure order)
+- Ability to drag event markers and rotations anywhere on the path (automatically rearranges structure order). Ability to drag rotation in the timeline and see it update in real time on the canvas
 - Ability to drag structure elements in timeline to rearrange order
 - Keybinds to jump around and to move to start of path
 - Option to only show structure elements close to where the current time is

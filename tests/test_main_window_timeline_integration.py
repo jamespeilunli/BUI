@@ -119,7 +119,7 @@ def test_view_menu_simulated_path_actions_update_canvas_mode(qt_app):
             "To Current Time",
             "Complete",
         ]
-        assert window.action_simulated_path_to_current_time.isChecked()
+        assert window.action_simulated_path_complete.isChecked()
         assert all(action.isCheckable() for action in window.action_group_simulated_path.actions())
 
         window.action_simulated_path_complete.trigger()

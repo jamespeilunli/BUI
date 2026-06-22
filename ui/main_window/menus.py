@@ -159,7 +159,7 @@ def build_menu_bar(window: "MainWindow") -> None:
         )
         window.action_group_simulated_path.addAction(action)
         window.menu_simulated_path.addAction(action)
-    window.action_simulated_path_to_current_time.setChecked(True)
+    window.action_simulated_path_complete.setChecked(True)
 
     settings_menu: QMenu = bar.addMenu("Settings")
     window.action_edit_config = QAction("Edit Config…", window)
