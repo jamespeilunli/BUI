@@ -7,3 +7,4 @@
 - A way to sync up with direct path json file changes (eg when switching branches)
 - Preserve fullscreen status on linux
 - See if we can sign BUI on mac to avoid security warning
+- Validation of existing path files (eg bad ordinals)
